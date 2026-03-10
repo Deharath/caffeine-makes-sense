@@ -1,0 +1,7 @@
+name=Caffeine Makes Sense
+id=CaffeineMakesSense
+poster=../poster.png
+author=Deharath
+modversion=1.0.0
+versionMin=42.14.0
+description=Caffeine is a masking agent, not a fatigue cure. Replaces vanilla's instant fatigue removal with a pharmacokinetic model: gradual onset, half-life decay, and rebound crash.
