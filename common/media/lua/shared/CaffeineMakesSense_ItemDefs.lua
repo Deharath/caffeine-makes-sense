@@ -26,9 +26,9 @@ ItemDefs.CAFFEINE_ITEMS = {
 -- Fluids remain listed for reference. The brewed drink items above are the
 -- active OnEat integration path in B42.
 ItemDefs.CAFFEINE_FLUIDS = {
-    ["Coffee"] = { dose = "DoseCoffee", category = "coffee", profile = "coffee" },
-    ["Tea"] = { dose = "DoseTea", category = "tea", profile = "tea" },
-    ["GreenTea"] = { dose = "DoseTea", category = "tea", profile = "tea" },
+    ["Coffee"] = { dose = "DoseCoffee", category = "coffee", profile = "coffee", vanillaFatigueChange = -0.10 },
+    ["Tea"] = { dose = "DoseTea", category = "tea", profile = "tea", vanillaFatigueChange = -0.05 },
+    ["GreenTea"] = { dose = "DoseTea", category = "tea", profile = "tea", vanillaFatigueChange = -0.05 },
 }
 
 -- Vitamin pills also have fatigueChange (caffeine pills in vanilla).

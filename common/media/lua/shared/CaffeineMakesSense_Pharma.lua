@@ -65,15 +65,21 @@ function Pharma.sleepDisruptionStrength(rawStimLoad, penaltyMax, maxCaffeineLeve
 end
 
 -- Project real fatigue to gameplay-facing fatigue.
--- Small benefit when fresh, strongest benefit in the mid/high-fatigue band,
--- then tapering again near exhaustion so caffeine never fully resurrects a
--- severely sleep-deprived character.
+-- The strongest relief lives in the meaningful tired band, where PZ's fatigue
+-- penalties accelerate sharply. Fresh players get little benefit, while very
+-- high fatigue still gets a small rescue instead of the curve collapsing to
+-- nearly zero at 0.95-1.00.
 function Pharma.projectDisplayedFatigue(realFatigue, maskStrength, suppressionFrac, projectionShapeScale)
     local real = clamp(realFatigue or 0, 0, 1)
     local mask = clamp(maskStrength or 0, 0, 1)
     local suppression = clamp(suppressionFrac or 0, 0, 1)
-    local shapeScale = math.max(0, tonumber(projectionShapeScale) or 1.8)
-    local fatigueShape = math.pow(real, 2.5) * math.pow(math.max(0, 1 - real), 0.6)
+    local shapeScale = math.max(0, tonumber(projectionShapeScale) or 4.0)
+    local coreShape = math.pow(real, 2.2) * math.max(0, 1 - real)
+    local highFatigueCarry = 0
+    if real > 0.85 then
+        highFatigueCarry = math.pow((real - 0.85) / 0.15, 1.35) * 0.06
+    end
+    local fatigueShape = coreShape + highFatigueCarry
     local delta = mask * suppression * shapeScale * fatigueShape
     return clamp(real - delta, 0, 1)
 end

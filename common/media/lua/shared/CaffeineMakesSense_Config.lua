@@ -1,20 +1,22 @@
 CaffeineMakesSense = CaffeineMakesSense or {}
 
 CaffeineMakesSense.DEFAULTS = {
-    -- Profile kinetics: pills hit faster and harder, coffee is smoother, tea is lighter.
-    PillOnsetMinutes = 20,
+    -- Shared caffeine kinetics across sources. The molecule is the same; item
+    -- differentiation now comes mainly from dose and convenience rather than
+    -- heavily divergent per-item pharmacology.
+    PillOnsetMinutes = 25,
     PillHalfLifeMinutes = 240,
     PillMaskScale = 1.00,
-    CoffeeOnsetMinutes = 30,
-    CoffeeHalfLifeMinutes = 210,
-    CoffeeMaskScale = 0.80,
+    CoffeeOnsetMinutes = 25,
+    CoffeeHalfLifeMinutes = 240,
+    CoffeeMaskScale = 1.00,
     TeaOnsetMinutes = 25,
-    TeaHalfLifeMinutes = 150,
-    TeaMaskScale = 0.60,
+    TeaHalfLifeMinutes = 240,
+    TeaMaskScale = 1.00,
 
-    -- Peak masking strength (0-1). At 1.0, caffeine at max dose fully suppresses
-    -- the fatigue rate. Scaled by effective caffeine / max caffeine.
-    PeakMaskStrength = 0.85,
+    -- Peak masking strength (0-1). With the current stronger gameplay projection,
+    -- this is allowed to reach full masking budget at high stimulant load.
+    PeakMaskStrength = 1.00,
 
     -- Minimum caffeine level (fraction of peak) below which the effect is negligible.
     NegligibleThreshold = 0.05,
@@ -30,15 +32,14 @@ CaffeineMakesSense.DEFAULTS = {
     MaxCaffeineLevel = 4.0,
 
     -- Active suppression budget applied through the gameplay projection curve.
-    -- This is not a flat multiplier on real fatigue; it scales the bell-shaped
-    -- "most useful when meaningfully tired" masking layer.
-    SuppressionFraction = 0.50,
+    -- Tuned high enough that one pill can temporarily hold fatigue thresholds
+    -- instead of just softening the climb by decorative amounts.
+    SuppressionFraction = 0.80,
 
     -- Extra gain on the gameplay projection curve.
-    -- With the current higher-centered smooth hump, values around 1.8 push the
-    -- strongest relief into the mid/high-fatigue band without letting caffeine
-    -- trivialize near-exhaustion.
-    ProjectionShapeScale = 1.8,
+    -- Combined with SuppressionFraction, this controls how hard caffeine can
+    -- pull effective fatigue down in the meaningful 0.60-0.80 gameplay band.
+    ProjectionShapeScale = 4.00,
 
     -- Maximum instantaneous sleep-disruption strength derived from active
     -- stimulant load while asleep. This feeds the weighted sleep-session score.

@@ -70,6 +70,10 @@ local function getLocalPlayer()
     return player
 end
 
+local function isMultiplayerClient()
+    return type(isClient) == "function" and isClient() == true
+end
+
 local function isPlayerAsleep(player)
     if not player or type(player.isAsleep) ~= "function" then
         return false
@@ -81,6 +85,19 @@ end
 local function computeSnapshot()
     local player = getLocalPlayer()
     if not player then return nil end
+
+    if isMultiplayerClient() then
+        local MPClient = CaffeineMakesSense.MPClient
+        if MPClient and type(MPClient.requestSnapshot) == "function" then
+            pcall(MPClient.requestSnapshot, "dev_panel", false)
+        end
+        if MPClient and type(MPClient.getSnapshot) == "function" then
+            local snap = MPClient.getSnapshot()
+            if snap then
+                return snap
+            end
+        end
+    end
 
     local State = CaffeineMakesSense.State
     local Pharma = CaffeineMakesSense.Pharma
@@ -325,8 +342,21 @@ function DevPanel.reset()
         print("[CaffeineMakesSense] reset: no player")
         return
     end
+    if isMultiplayerClient() then
+        local MPClient = CaffeineMakesSense.MPClient
+        if MPClient and type(MPClient.requestReset) == "function" then
+            local ok = pcall(MPClient.requestReset, "dev_panel")
+            if ok then
+                print("[CaffeineMakesSense] reset requested from server")
+            else
+                print("[CaffeineMakesSense] reset request failed")
+            end
+            return
+        end
+    end
     local State = CaffeineMakesSense.State
-    if not State then return end
+    local Runtime = CaffeineMakesSense.Runtime
+    if not State or not Runtime then return end
 
     local state = State.ensureState(player)
     if not state then return end
@@ -345,23 +375,7 @@ function DevPanel.reset()
         print(string.format("[CaffeineMakesSense] reset: restored fatigue %.1f%% -> %.1f%%", (fatNow or 0) * 100, restored * 100))
     end
 
-    state.doses = {}
-    state.hiddenFatigue = 0
-    state.peakStimThisCycle = 0
-    state.pendingCatchupMinutes = 0
-    state.wasSleeping = false
-    state.sleepStartMinute = nil
-    state.sleepLastAccumMinute = nil
-    state.sleepWeightedDisruption = 0
-    state.sleepWeightedMinutes = 0
-    state.sleepPeakDisruption = 0
-    state.sleepDisruptionScore = 0
-    state.sleepDisruptionStrength = 0
-    state.sleepPendingWakeFatigue = 0
-    state.lastWakeFatiguePenalty = 0
-    state.lastSleepDisruptionScore = 0
-    state.realFatigue = restored
-    state.lastSetFatigue = restored
+    Runtime.resetState(state, restored)
 
     if recording then
         pcall(DevPanel.sampleEvent, "reset", "")
@@ -606,6 +620,10 @@ function DevPanel.show()
     panelInstance:initialise()
     panelInstance:addToUIManager()
     panelInstance:setVisible(true)
+    local MPClient = CaffeineMakesSense.MPClient
+    if isMultiplayerClient() and MPClient and type(MPClient.requestSnapshot) == "function" then
+        pcall(MPClient.requestSnapshot, "panel_open", true)
+    end
     print("[CaffeineMakesSense] dev panel opened")
 end
 

@@ -5,9 +5,10 @@ local MP = CaffeineMakesSense.MP
 
 MP.NET_MODULE = "CaffeineMakesSenseRuntime"
 MP.CAFFEINE_DOSE_COMMAND = "caffeine_dose"
+MP.RESET_COMMAND = "reset"
 MP.SNAPSHOT_COMMAND = "snapshot"
 MP.REQUEST_SNAPSHOT_COMMAND = "request_snapshot"
 MP.MOD_STATE_KEY = "CaffeineMakesSenseState"
-MP.SCRIPT_VERSION = "1.0.0"
+MP.SCRIPT_VERSION = "1.0.1"
 
 return MP

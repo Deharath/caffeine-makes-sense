@@ -55,9 +55,10 @@ Caffeine should behave like a curve, not a coupon.
 
 Effects:
 
-* Pills rise fastest and hit hardest
-* Coffee rises more gradually
-* Tea is milder and shorter-lived
+* Caffeine ramps in instead of applying instantly
+* Item differences come mainly from dose and convenience, not fake separate chemistry
+* Pills are the strongest deliberate push because they are the biggest dose
+* Coffee and tea are milder because they are smaller doses
 * All forms fade by half-life decay, not a hard timer
 
 Result:
@@ -131,7 +132,7 @@ CMS integrates into those systems. It does not bypass them or build a separate w
 Caffeine becomes a strategic consumable:
 
 * Drink it before the danger, not after you are already collapsing.
-* Use coffee to cope and pills to push.
+* Use coffee to cope and pills to push harder.
 * Respect the tail.
 * Respect sleep.
 * Stack only when you are choosing tomorrow's problem on purpose.

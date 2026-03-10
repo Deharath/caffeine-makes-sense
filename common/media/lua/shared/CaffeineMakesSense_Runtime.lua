@@ -227,6 +227,30 @@ function Runtime.isPlayerAsleep(playerObj)
     return safeCall(playerObj, "isAsleep") == true
 end
 
+function Runtime.resetState(state, restoredFatigue)
+    if not state then
+        return
+    end
+    local restored = clamp(tonumber(restoredFatigue) or 0, 0, 1)
+    state.doses = {}
+    state.hiddenFatigue = 0
+    state.peakStimThisCycle = 0
+    state.pendingCatchupMinutes = 0
+    state.wasSleeping = false
+    state.sleepStartMinute = nil
+    state.sleepLastAccumMinute = nil
+    state.sleepWeightedDisruption = 0
+    state.sleepWeightedMinutes = 0
+    state.sleepPeakDisruption = 0
+    state.sleepDisruptionScore = 0
+    state.sleepDisruptionStrength = 0
+    state.sleepPendingWakeFatigue = 0
+    state.lastWakeFatiguePenalty = 0
+    state.lastSleepDisruptionScore = 0
+    state.realFatigue = restored
+    state.lastSetFatigue = restored
+end
+
 local function clearSleepSession(state)
     state.sleepStartMinute = nil
     state.sleepLastAccumMinute = nil

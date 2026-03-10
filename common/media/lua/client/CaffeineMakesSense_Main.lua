@@ -8,6 +8,7 @@ require "CaffeineMakesSense_Boot"
 require "CaffeineMakesSense_State"
 require "CaffeineMakesSense_Tick"
 require "CaffeineMakesSense_Hooks"
+pcall(require, "CaffeineMakesSense_MPClientRuntime")
 
 local State = CaffeineMakesSense.State
 local Tick = CaffeineMakesSense.Tick
@@ -101,6 +102,8 @@ end
 local function onGameBoot()
     local ok, err = pcall(function()
         registerOnEatCallbacks()
+        Hooks.wrapDrinkFluidAction()
+        Hooks.wrapEatFoodAction()
         tryLoadDevPanel()
     end)
     if not ok then

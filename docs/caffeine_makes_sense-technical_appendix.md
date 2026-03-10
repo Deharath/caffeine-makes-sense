@@ -1,7 +1,7 @@
-# Caffeine Makes Sense — Technical Appendix (v0.1.0)
+# Caffeine Makes Sense — Technical Appendix (v1.0.0)
 
 _As of March 10, 2026_  
-`SCRIPT_VERSION=0.1.0`
+`SCRIPT_VERSION=1.0.0`
 
 ## Scope
 
@@ -16,9 +16,10 @@ The current docs are organized around two core references:
 Core design intent:
 - replace vanilla's instant fatigue removal with time-based caffeine kinetics
 - keep true fatigue accumulating underneath the visible masked value
-- differentiate pills, coffee, and tea by onset, half-life, and mask scale
+- keep one shared caffeine curve and differentiate items mainly by dose
 - make rebound emerge from fading masking, not a scripted crash penalty
 - make bedtime caffeine degrade sleep quality primarily through a wake fatigue remainder
+- tune masking against Project Zomboid's threshold-heavy fatigue gameplay rather than a literal real-world percent-less-sleepy reading
 
 Runtime split:
 - singleplayer uses the client runtime path plus the shared simulation core
@@ -37,9 +38,15 @@ Runtime split:
 ### Pharmacokinetics
 
 Profiles are defined in [CaffeineMakesSense_Config.lua](../common/media/lua/shared/CaffeineMakesSense_Config.lua):
-- pills: fastest onset, strongest dose
-- coffee: slower onset, smoother arc
-- tea: mild and shorter-lived
+- pills: strongest dose
+- coffee: medium dose
+- tea: mild dose
+
+Kinetics are now intentionally near-shared across sources:
+- one caffeine model
+- one onset/decay family
+- item differences are expressed mainly through dose magnitude and gameplay convenience
+- the current projection is intentionally strongest in the meaningful `0.60-0.80` gameplay band and tapers harder again by `0.85+`
 
 Each dose stores:
 - `doseLevel`
@@ -52,7 +59,7 @@ Each dose stores:
 - exponential half-life decay
 - saturating mask strength from aggregate mask load
 - saturating sleep disruption strength from aggregate stimulant load
-- gameplay fatigue projection with a higher-centered fatigue-band curve
+- gameplay fatigue projection with a stronger mid/high-fatigue band curve tuned around PZ's threshold-heavy penalties
 
 ### Fatigue Projection
 
@@ -103,7 +110,7 @@ Important state fields in [CaffeineMakesSense_Runtime.lua](../common/media/lua/s
 - `client/CaffeineMakesSense_Main.lua` — client boot facade, event registration, SP tick wiring, dev panel hotkey/context menu
 - `client/CaffeineMakesSense_Tick.lua` — thin client wrapper into shared runtime tick
 - `client/CaffeineMakesSense_State.lua` — thin client wrapper into shared state/runtime helpers
-- `client/CaffeineMakesSense_Hooks.lua` — OnEat dose entrypoint, dev recording dose events, MP dose forwarding
+- `client/CaffeineMakesSense_Hooks.lua` — consume hooks for `OnEat`, `ISDrinkFluidAction`, and `ISEatFoodAction`; also handles dev recording dose events and MP dose forwarding
 
 ### Dev-only Client
 - `client/dev/CaffeineMakesSense_DevPanel.lua` — debug overlay, recording UI, CSV export, reset helper; present in dev builds and stripped from release builds
@@ -117,7 +124,7 @@ Important state fields in [CaffeineMakesSense_Runtime.lua](../common/media/lua/s
 - `shared/CaffeineMakesSense_Boot.lua` — boot-time vanilla item patching
 
 ### Server
-- `server/CaffeineMakesSense_MPServerRuntime.lua` — MP dose receive path and per-minute server tick using shared runtime
+- `server/CaffeineMakesSense_MPServerRuntime.lua` — MP dose receive path, server consume hook registration, snapshot/reset command handling, and per-minute server tick using shared runtime
 
 ## Item Integration
 
@@ -128,12 +135,15 @@ Important state fields in [CaffeineMakesSense_Runtime.lua](../common/media/lua/s
 - direct consumables kept for compatibility/reference: `Base.Coffee2`, `Base.Teabag2`, `Base.ChocolateCoveredCoffeeBeans`
 
 The active gameplay path is `OnEat = CMS_OnEatCaffeine`, registered at boot on supported items.
+Fluid and hot-drink consume paths that bypass plain `OnEat` are also wrapped so vanilla flat coffee/tea fatigue changes are neutralized before CMS applies its own model.
 
 ## Diagnostics And Recording
 
 The dev panel can be opened without the Lua Dev Console:
 - `Numpad 6`
 - debug world context menu: `CMS Dev Panel`
+
+In multiplayer, the panel reads authoritative server snapshots rather than unsynced local state. The panel reset action also routes through the server so it clears real MP caffeine state instead of only wiping the client view.
 
 Recording CSV currently includes:
 - elapsed/game time
@@ -151,13 +161,14 @@ Recording CSV currently includes:
 - dose events and profile tags
 
 Analyzer:
-- `tools/caffeine_makes_sense/scripts/analyze_recording.py`
+- `tools/analyze_recording.py`
 - supports older sleep-penalty CSVs and current sleep-disruption CSVs
 
 ## Current Behavior Notes
 
 As of the current build:
 - pills are modeled as roughly `200 mg` doses
-- coffee is intentionally a bit generous in gameplay terms so it remains worth brewing
+- coffee uses the same shared caffeine curve and is mainly differentiated by lower dose and preparation friction
 - one-pill bedtime use is intended to be mildly bad, not a ruined night
 - heavier bedtime stimulant burden should scale up disruption and wake penalty without collapsing sleep duration into the old artifact
+- all-nighter behavior is intentionally bounded: redosing can buy a long push through `Drowsy`/`Tired`, but severe fatigue still stops being meaningfully rescueable near the top end
