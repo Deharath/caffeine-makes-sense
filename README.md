@@ -44,11 +44,6 @@ The git repo includes two development-facing tools:
 
 The Workshop package is stripped of the dev panel and related diagnostics.
 
-## Source Code
-
-Full source is on [GitHub](https://github.com/Deharath/caffeine-makes-sense).
-
-- Mod ID: `CaffeineMakesSense`
 
 ## Author
 
