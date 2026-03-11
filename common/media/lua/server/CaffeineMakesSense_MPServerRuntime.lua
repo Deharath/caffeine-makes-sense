@@ -59,6 +59,7 @@ local function buildSnapshot(playerObj)
     local displayedFatigue = Runtime.getFatigue(playerObj) or 0
     local realFatigue = tonumber(state.realFatigue) or displayedFatigue
     local hiddenFatigue = math.max(0, tonumber(state.hiddenFatigue) or (realFatigue - displayedFatigue))
+    local totalStress = Runtime.getStress(playerObj) or 0
     local stage = "inactive"
     if rawStimLoad >= negligible then
         if newestDose and (nowMinutes - newestDose.doseMinute) < onsetMin then
@@ -87,6 +88,9 @@ local function buildSnapshot(playerObj)
         maskStrength = maskStrength,
         stimFraction = stimFraction,
         hiddenFatigue = hiddenFatigue,
+        totalStress = totalStress,
+        caffeineStress = tonumber(state.caffeineStressCurrent) or 0,
+        caffeineStressTarget = tonumber(state.caffeineStressTarget) or 0,
         sleepDisruption = math.max(tonumber(state.sleepDisruptionScore) or 0, tonumber(state.lastSleepDisruptionScore) or 0),
         wakeFatiguePenalty = tonumber(state.lastWakeFatiguePenalty) or 0,
         displayedFatigue = displayedFatigue,
@@ -126,6 +130,7 @@ local function resetPlayerState(playerObj)
         return false
     end
     local restored = Runtime.getFatigue(playerObj) or tonumber(state.realFatigue) or 0
+    Runtime.clearAppliedCaffeineStress(playerObj, state)
     Runtime.resetState(state, restored)
     Runtime.setFatigue(playerObj, restored)
     return true

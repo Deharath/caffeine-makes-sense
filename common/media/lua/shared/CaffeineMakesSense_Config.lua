@@ -25,6 +25,8 @@ CaffeineMakesSense.DEFAULTS = {
     -- Scaled to real mg: coffee=95mg=1.0, pill=200mg=2.0, tea=47mg=0.5.
     DoseCoffee = 1.0,
     DoseTea = 0.5,
+    DoseCoffeePackage = 5.0,
+    DoseTeabag = 0.85,
     DoseCoffeeBeans = 0.6,
     DoseVitamins = 2.0,
 
@@ -49,6 +51,20 @@ CaffeineMakesSense.DEFAULTS = {
     -- disruption score. Visible wake fatigue may still be partially masked by
     -- active caffeine after this is applied.
     SleepWakeFatigueMax = 0.12,
+
+    -- Acute overstimulation stress is a temporary CMS-owned contribution layered
+    -- onto vanilla stress. It starts building below pill-level peak overlap so
+    -- ordinary strong use can feel edgy, while sustained stacking is what
+    -- pushes the player toward visible stress moodles.
+    StressLoadStart = 1.35,
+    StressLoadMax = 4.0,
+    StressTargetMax = 0.70,
+    StressCurvePower = 1.10,
+    StressDebtAmpHidden = 0.25,
+    StressDebtAmpMax = 0.35,
+    StressRiseTauMinutes = 20,
+    StressDecayTauMinutes = 90,
+    StressSleepDecayTauMinutes = 45,
 
     -- Tick cap for catch-up slicing (same pattern as AMS).
     DtMaxMinutes = 3,

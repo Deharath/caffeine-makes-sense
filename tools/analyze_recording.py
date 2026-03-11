@@ -65,6 +65,9 @@ def normalize_row(row):
         "fatigue_post": to_float(row.get("fatigue_post")),
         "real_fatigue_est": to_float(row.get("real_fatigue_est")),
         "hidden_debt": to_float(row.get("hidden_debt")),
+        "stress_total_pct": to_float(row.get("stress_total_pct")),
+        "stress_cms_pct": to_float(row.get("stress_cms_pct")),
+        "stress_target_pct": to_float(row.get("stress_target_pct")),
         "sleep_disruption_pct": to_float(row.get("sleep_disruption_pct", row.get("sleep_penalty_pct"))),
         "wake_fatigue_penalty": to_float(row.get("wake_fatigue_penalty")),
         "sleep_session_min": to_float(row.get("sleep_session_min")),
@@ -126,6 +129,9 @@ def build_summary(path, rows):
     peak_raw = max(rows, key=lambda r: r["raw_stim_load"])
     peak_mask = max(rows, key=lambda r: r["mask_load"])
     peak_hidden = max(rows, key=lambda r: r["hidden_debt"])
+    peak_stress_total = max(rows, key=lambda r: r["stress_total_pct"])
+    peak_stress_cms = max(rows, key=lambda r: r["stress_cms_pct"])
+    peak_stress_target = max(rows, key=lambda r: r["stress_target_pct"])
     peak_sleep = max(rows, key=lambda r: r["sleep_disruption_pct"])
     peak_wake_penalty = max(rows, key=lambda r: r["wake_fatigue_penalty"])
     min_fatigue = min(rows, key=lambda r: r["fatigue_post"])
@@ -144,6 +150,9 @@ def build_summary(path, rows):
                 "mask_pct_sum": 0.0,
                 "fatigue_post_sum": 0.0,
                 "hidden_debt_sum": 0.0,
+                "stress_total_pct_sum": 0.0,
+                "stress_cms_pct_sum": 0.0,
+                "stress_target_pct_sum": 0.0,
                 "sleep_disruption_pct_sum": 0.0,
                 "wake_fatigue_penalty_sum": 0.0,
             },
@@ -154,6 +163,9 @@ def build_summary(path, rows):
         bucket["mask_pct_sum"] += row["mask_pct"]
         bucket["fatigue_post_sum"] += row["fatigue_post"]
         bucket["hidden_debt_sum"] += row["hidden_debt"]
+        bucket["stress_total_pct_sum"] += row["stress_total_pct"]
+        bucket["stress_cms_pct_sum"] += row["stress_cms_pct"]
+        bucket["stress_target_pct_sum"] += row["stress_target_pct"]
         bucket["sleep_disruption_pct_sum"] += row["sleep_disruption_pct"]
         bucket["wake_fatigue_penalty_sum"] += row["wake_fatigue_penalty"]
 
@@ -167,6 +179,9 @@ def build_summary(path, rows):
             "mask_pct_avg": bucket["mask_pct_sum"] / rows_n,
             "fatigue_post_avg": bucket["fatigue_post_sum"] / rows_n,
             "hidden_debt_avg": bucket["hidden_debt_sum"] / rows_n,
+            "stress_total_pct_avg": bucket["stress_total_pct_sum"] / rows_n,
+            "stress_cms_pct_avg": bucket["stress_cms_pct_sum"] / rows_n,
+            "stress_target_pct_avg": bucket["stress_target_pct_sum"] / rows_n,
             "sleep_disruption_pct_avg": bucket["sleep_disruption_pct_sum"] / rows_n,
             "wake_fatigue_penalty_avg": bucket["wake_fatigue_penalty_sum"] / rows_n,
         }
@@ -205,6 +220,16 @@ def build_summary(path, rows):
             "peak": peak_hidden["hidden_debt"],
             "peak_at_elapsed_min": peak_hidden["elapsed_min"],
             "end": last["hidden_debt"],
+        },
+        "stress": {
+            "peak_total_pct": peak_stress_total["stress_total_pct"],
+            "peak_total_at_elapsed_min": peak_stress_total["elapsed_min"],
+            "peak_cms_pct": peak_stress_cms["stress_cms_pct"],
+            "peak_cms_at_elapsed_min": peak_stress_cms["elapsed_min"],
+            "peak_target_pct": peak_stress_target["stress_target_pct"],
+            "peak_target_at_elapsed_min": peak_stress_target["elapsed_min"],
+            "end_total_pct": last["stress_total_pct"],
+            "end_cms_pct": last["stress_cms_pct"],
         },
         "sleep_disruption": {
             "peak_pct": peak_sleep["sleep_disruption_pct"],
@@ -251,6 +276,9 @@ def select_sample_rows(rows, limit):
             "fatigue_pre": row["fatigue_pre"],
             "fatigue_post": row["fatigue_post"],
             "hidden_debt": row["hidden_debt"],
+            "stress_total_pct": row["stress_total_pct"],
+            "stress_cms_pct": row["stress_cms_pct"],
+            "stress_target_pct": row["stress_target_pct"],
             "sleep_disruption_pct": row["sleep_disruption_pct"],
             "wake_fatigue_penalty": row["wake_fatigue_penalty"],
             "event": row["event"] or None,
@@ -266,6 +294,7 @@ def print_text(summary):
     raw_stim = summary["raw_stim"]
     mask = summary["mask"]
     hidden = summary["hidden_debt"]
+    stress = summary["stress"]
     sleep = summary["sleep_disruption"]
 
     print(f"file: {summary['file']}")
@@ -293,6 +322,14 @@ def print_text(summary):
         "hidden_debt:"
         f" peak={fmt_num(hidden['peak'], 4)}@{fmt_num(hidden['peak_at_elapsed_min'], 1)}"
         f" end={fmt_num(hidden['end'], 4)}"
+    )
+    print(
+        "stress:"
+        f" peak_total={fmt_num(stress['peak_total_pct'], 2)}%@{fmt_num(stress['peak_total_at_elapsed_min'], 1)}"
+        f" peak_cms={fmt_num(stress['peak_cms_pct'], 2)}%@{fmt_num(stress['peak_cms_at_elapsed_min'], 1)}"
+        f" peak_target={fmt_num(stress['peak_target_pct'], 2)}%@{fmt_num(stress['peak_target_at_elapsed_min'], 1)}"
+        f" end_total={fmt_num(stress['end_total_pct'], 2)}%"
+        f" end_cms={fmt_num(stress['end_cms_pct'], 2)}%"
     )
     print(
         "sleep_disruption:"
@@ -338,6 +375,8 @@ def print_text(summary):
                 f" mask_pct_avg={fmt_num(data['mask_pct_avg'], 2)}"
                 f" fatigue_avg={fmt_num(data['fatigue_post_avg'], 4)}"
                 f" hidden_avg={fmt_num(data['hidden_debt_avg'], 4)}"
+                f" stress_total_avg={fmt_num(data['stress_total_pct_avg'], 2)}"
+                f" stress_cms_avg={fmt_num(data['stress_cms_pct_avg'], 2)}"
                 f" sleep_disruption_avg={fmt_num(data['sleep_disruption_pct_avg'], 2)}"
                 f" wake_penalty_avg={fmt_num(data['wake_fatigue_penalty_avg'], 4)}"
             )
@@ -356,6 +395,9 @@ def print_text(summary):
                 f" pre={fmt_num(row['fatigue_pre'], 4)}"
                 f" post={fmt_num(row['fatigue_post'], 4)}"
                 f" hidden={fmt_num(row['hidden_debt'], 4)}"
+                f" stress_total={fmt_num(row['stress_total_pct'], 2)}"
+                f" stress_cms={fmt_num(row['stress_cms_pct'], 2)}"
+                f" stress_target={fmt_num(row['stress_target_pct'], 2)}"
                 f" sleep_disruption={fmt_num(row['sleep_disruption_pct'], 2)}"
                 f" wake_penalty={fmt_num(row['wake_fatigue_penalty'], 4)}"
                 f"{event}"

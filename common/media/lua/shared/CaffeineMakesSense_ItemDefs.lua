@@ -6,8 +6,8 @@ local ItemDefs = CaffeineMakesSense.ItemDefs
 -- Items whose vanilla fatigueChange we zero at boot and replace with our model.
 -- Keys: item fullType. Values: { dose = caffeine dose strength, category = label, profile = key }.
 ItemDefs.CAFFEINE_ITEMS = {
-    ["Base.Coffee2"] = { dose = "DoseCoffee", category = "coffee", profile = "coffee" },
-    ["Base.Teabag2"] = { dose = "DoseTea", category = "tea", profile = "tea" },
+    ["Base.Coffee2"] = { dose = "DoseCoffeePackage", category = "coffee_package", profile = "coffee" },
+    ["Base.Teabag2"] = { dose = "DoseTeabag", category = "tea_bag", profile = "tea" },
     ["Base.ChocolateCoveredCoffeeBeans"] = { dose = "DoseCoffeeBeans", category = "coffee_beans", profile = "coffee" },
     ["Base.HotDrink"] = { dose = "DoseCoffee", category = "coffee", profile = "coffee" },
     ["Base.HotDrinkClay"] = { dose = "DoseCoffee", category = "coffee", profile = "coffee" },

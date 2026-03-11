@@ -63,6 +63,20 @@ local function getFatigue(player)
     return nil
 end
 
+local function getStress(player)
+    local ok, stats = pcall(player.getStats, player)
+    if not ok or not stats then return nil end
+    if CharacterStat and CharacterStat.STRESS then
+        local ok2, val = pcall(stats.get, stats, CharacterStat.STRESS)
+        if ok2 then return tonumber(val) end
+    end
+    if type(stats.getStress) == "function" then
+        local ok2, val = pcall(stats.getStress, stats)
+        if ok2 then return tonumber(val) end
+    end
+    return nil
+end
+
 local function getLocalPlayer()
     if type(getPlayer) ~= "function" then return nil end
     local ok, player = pcall(getPlayer)
@@ -159,6 +173,9 @@ local function computeSnapshot()
         wakeFatiguePenalty = tonumber(state.lastWakeFatiguePenalty) or 0,
         displayedFatigue = getFatigue(player) or 0,
         realFatigue = state.realFatigue or (getFatigue(player) or 0),
+        totalStress = getStress(player) or 0,
+        caffeineStress = tonumber(state.caffeineStressCurrent) or 0,
+        caffeineStressTarget = tonumber(state.caffeineStressTarget) or 0,
         sleeping = isPlayerAsleep(player),
         sleepSessionMinutes = math.max(0, now - (tonumber(state.sleepStartMinute) or now)),
         stage = stage,
@@ -185,6 +202,9 @@ local CSV_HEADER = table.concat({
     "fatigue_post",
     "real_fatigue_est",
     "hidden_debt",
+    "stress_total_pct",
+    "stress_cms_pct",
+    "stress_target_pct",
     "sleep_disruption_pct",
     "wake_fatigue_penalty",
     "sleep_session_min",
@@ -222,6 +242,9 @@ local function recordSample(snap, eventTag, eventProfile)
         snap.displayedFatigue,
         snap.realFatigue,
         snap.hiddenFatigue,
+        (snap.totalStress or 0) * 100,
+        (snap.caffeineStress or 0) * 100,
+        (snap.caffeineStressTarget or 0) * 100,
         snap.sleepDisruption * 100,
         snap.wakeFatiguePenalty,
         snap.sleepSessionMinutes,
@@ -363,6 +386,7 @@ function DevPanel.reset()
 
     local fatNow = getFatigue(player)
     local restored = clamp(state.realFatigue or fatNow or 0, 0, 1)
+    Runtime.clearAppliedCaffeineStress(player, state)
     if fatNow ~= nil and math.abs(restored - fatNow) > 0.0001 then
         local ok, stats = pcall(player.getStats, player)
         if ok and stats then
@@ -548,6 +572,12 @@ function CMS_DevOverlay:render()
     y = drawRow(self, y, "Real (estimated)", string.format("%.1f%%", snap.realFatigue * 100), COLOR_DIM)
     y = drawRow(self, y, "Hidden Debt", string.format("%.4f", snap.hiddenFatigue))
     y = drawBar(self, y, snap.hiddenFatigue, COLOR_HIDDEN)
+
+    y = drawSectionHeader(self, y, "Stress")
+    y = drawRow(self, y, "Total Stress", string.format("%.1f%%", (snap.totalStress or 0) * 100))
+    y = drawRow(self, y, "CMS Stress", string.format("%.1f%%", (snap.caffeineStress or 0) * 100), (snap.caffeineStress or 0) > 0 and COLOR_SLEEP or COLOR_DIM)
+    y = drawBar(self, y, snap.caffeineStress or 0, COLOR_SLEEP)
+    y = drawRow(self, y, "Stress Target", string.format("%.1f%%", (snap.caffeineStressTarget or 0) * 100), COLOR_DIM)
 
     y = drawSectionHeader(self, y, "Sleep")
     y = drawRow(self, y, "Sleeping", snap.sleeping and "YES" or "NO", snap.sleeping and COLOR_SLEEP or COLOR_DIM)

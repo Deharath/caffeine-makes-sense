@@ -1,7 +1,7 @@
-# Caffeine Makes Sense — Technical Appendix (v1.0.0)
+# Caffeine Makes Sense — Technical Appendix (v1.0.2)
 
 _As of March 10, 2026_  
-`SCRIPT_VERSION=1.0.0`
+`SCRIPT_VERSION=1.0.2`
 
 ## Scope
 
@@ -20,6 +20,7 @@ Core design intent:
 - make rebound emerge from fading masking, not a scripted crash penalty
 - make bedtime caffeine degrade sleep quality primarily through a wake fatigue remainder
 - tune masking against Project Zomboid's threshold-heavy fatigue gameplay rather than a literal real-world percent-less-sleepy reading
+- use stress only as an acute overstimulation signal for abuse, not as a baseline caffeine tax
 
 Runtime split:
 - singleplayer uses the client runtime path plus the shared simulation core
@@ -90,6 +91,20 @@ Instead:
 - on wake, CMS applies a bounded `wakePenalty` once to `state.realFatigue`
 - if caffeine is still active after wake, visible fatigue may remain somewhat masked
 
+### Acute Stress Model
+
+The current stress penalty is an acute overstimulation channel:
+- it is derived mainly from current `rawStimLoad`
+- it starts only once stimulant load rises above a safe band
+- hidden debt mildly amplifies it, but does not trigger it on its own
+- CMS owns only its own temporary stress contribution and layers it onto vanilla stress
+
+This means:
+- normal coffee use stays clean
+- one ordinary pill may create a slight edge but usually not a visible stress moodle
+- sustained stacking and all-nighter abuse can build toward `Tense` and `Agitated`
+- the caffeine-owned contribution decays back out as stimulant load falls or the player sleeps
+
 Important state fields in [CaffeineMakesSense_Runtime.lua](../common/media/lua/shared/CaffeineMakesSense_Runtime.lua):
 - `realFatigue`
 - `hiddenFatigue`
@@ -103,6 +118,9 @@ Important state fields in [CaffeineMakesSense_Runtime.lua](../common/media/lua/s
 - `sleepDisruptionScore`
 - `sleepPendingWakeFatigue`
 - `lastWakeFatiguePenalty`
+- `caffeineStressCurrent`
+- `caffeineStressTarget`
+- `lastAppliedCaffeineStress`
 
 ## Module Inventory
 
@@ -132,10 +150,11 @@ Important state fields in [CaffeineMakesSense_Runtime.lua](../common/media/lua/s
 - caffeine pills: `Base.PillsVitamins`
 - brewed coffee items: `Base.HotDrink*` mug/tumbler variants
 - brewed tea items: `Base.HotDrinkTea*`
-- direct consumables kept for compatibility/reference: `Base.Coffee2`, `Base.Teabag2`, `Base.ChocolateCoveredCoffeeBeans`
+- direct consumables: `Base.Coffee2`, `Base.Teabag2`, `Base.ChocolateCoveredCoffeeBeans`
 
 The active gameplay path is `OnEat = CMS_OnEatCaffeine`, registered at boot on supported items.
 Fluid and hot-drink consume paths that bypass plain `OnEat` are also wrapped so vanilla flat coffee/tea fatigue changes are neutralized before CMS applies its own model.
+`Base.Coffee2` and `Base.Teabag2` are intentionally stronger than one brewed serving when consumed directly, because the vanilla items represent multi-serving ingredient packages and CMS preserves fractional consumption scaling.
 
 ## Diagnostics And Recording
 
@@ -155,6 +174,9 @@ Recording CSV currently includes:
 - `fatigue_post`
 - `real_fatigue_est`
 - `hidden_debt`
+- `stress_total_pct`
+- `stress_cms_pct`
+- `stress_target_pct`
 - `sleep_disruption_pct`
 - `wake_fatigue_penalty`
 - `sleep_session_min`

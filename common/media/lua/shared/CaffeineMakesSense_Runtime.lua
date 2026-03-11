@@ -107,6 +107,9 @@ function Runtime.ensureStateTable(state, nowMinutes)
     state.sleepPendingWakeFatigue = tonumber(state.sleepPendingWakeFatigue) or 0
     state.lastWakeFatiguePenalty = tonumber(state.lastWakeFatiguePenalty) or 0
     state.lastSleepDisruptionScore = tonumber(state.lastSleepDisruptionScore) or 0
+    state.caffeineStressCurrent = clamp(tonumber(state.caffeineStressCurrent) or 0, 0, 1)
+    state.caffeineStressTarget = clamp(tonumber(state.caffeineStressTarget) or 0, 0, 1)
+    state.lastAppliedCaffeineStress = clamp(tonumber(state.lastAppliedCaffeineStress) or 0, 0, 1)
     return state
 end
 
@@ -223,8 +226,50 @@ function Runtime.setFatigue(playerObj, value)
     safeCall(stats, "setFatigue", value)
 end
 
+function Runtime.getStress(playerObj)
+    local stats = safeCall(playerObj, "getStats")
+    if not stats then
+        return nil
+    end
+    if CharacterStat and CharacterStat.STRESS then
+        return tonumber(safeCall(stats, "get", CharacterStat.STRESS))
+    end
+    return tonumber(safeCall(stats, "getStress"))
+end
+
+function Runtime.setStress(playerObj, value)
+    local stats = safeCall(playerObj, "getStats")
+    if not stats then
+        return
+    end
+    value = clamp(value, 0, 1)
+    if CharacterStat and CharacterStat.STRESS then
+        safeCall(stats, "set", CharacterStat.STRESS, value)
+        return
+    end
+    safeCall(stats, "setStress", value)
+end
+
 function Runtime.isPlayerAsleep(playerObj)
     return safeCall(playerObj, "isAsleep") == true
+end
+
+function Runtime.clearAppliedCaffeineStress(playerObj, state)
+    if not state then
+        return
+    end
+    local totalStress = Runtime.getStress(playerObj)
+    if totalStress == nil then
+        state.lastAppliedCaffeineStress = 0
+        state.caffeineStressCurrent = 0
+        state.caffeineStressTarget = 0
+        return
+    end
+    local priorApplied = clamp(state.lastAppliedCaffeineStress or 0, 0, 1)
+    Runtime.setStress(playerObj, clamp(totalStress - priorApplied, 0, 1))
+    state.lastAppliedCaffeineStress = 0
+    state.caffeineStressCurrent = 0
+    state.caffeineStressTarget = 0
 end
 
 function Runtime.resetState(state, restoredFatigue)
@@ -247,6 +292,9 @@ function Runtime.resetState(state, restoredFatigue)
     state.sleepPendingWakeFatigue = 0
     state.lastWakeFatiguePenalty = 0
     state.lastSleepDisruptionScore = 0
+    state.caffeineStressCurrent = 0
+    state.caffeineStressTarget = 0
+    state.lastAppliedCaffeineStress = 0
     state.realFatigue = restored
     state.lastSetFatigue = restored
 end
@@ -260,6 +308,41 @@ local function clearSleepSession(state)
     state.sleepDisruptionScore = 0
     state.sleepDisruptionStrength = 0
     state.sleepPendingWakeFatigue = 0
+end
+
+local function updateCaffeineStress(playerObj, state, rawStimLoad, dtMinutes, sleeping, options)
+    local Pharma = CaffeineMakesSense.Pharma
+    if not state or type(Pharma) ~= "table" then
+        return
+    end
+
+    local target = 0
+    if not sleeping then
+        target = Pharma.caffeineStressTarget(rawStimLoad, state.hiddenFatigue or 0, options)
+    end
+
+    local tauMinutes
+    if sleeping then
+        tauMinutes = tonumber(options.StressSleepDecayTauMinutes) or 60
+    elseif target > (state.caffeineStressCurrent or 0) then
+        tauMinutes = tonumber(options.StressRiseTauMinutes) or 90
+    else
+        tauMinutes = tonumber(options.StressDecayTauMinutes) or 120
+    end
+
+    state.caffeineStressTarget = clamp(target, 0, 1)
+    state.caffeineStressCurrent = clamp(
+        Pharma.approachValue(state.caffeineStressCurrent or 0, state.caffeineStressTarget, dtMinutes, tauMinutes),
+        0,
+        1
+    )
+
+    local totalStress = Runtime.getStress(playerObj) or 0
+    local priorApplied = clamp(state.lastAppliedCaffeineStress or 0, 0, 1)
+    local baselineStress = clamp(totalStress - priorApplied, 0, 1)
+    local newTotalStress = clamp(baselineStress + (state.caffeineStressCurrent or 0), 0, 1)
+    Runtime.setStress(playerObj, newTotalStress)
+    state.lastAppliedCaffeineStress = state.caffeineStressCurrent or 0
 end
 
 function Runtime.beginSleepSession(playerObj, state, nowMinutes)
@@ -432,6 +515,8 @@ function Runtime.tickPlayer(playerObj)
             state.hiddenFatigue = 0
         end
 
+        updateCaffeineStress(playerObj, state, rawStimLoad, dt, sleeping, options)
+
         Runtime.setFatigue(playerObj, targetDisplayed)
         state.lastSetFatigue = targetDisplayed
 
@@ -441,6 +526,7 @@ function Runtime.tickPlayer(playerObj)
             state.sleepDisruptionStrength = 0
             state.sleepDisruptionScore = 0
             state.sleepPendingWakeFatigue = 0
+            state.caffeineStressTarget = 0
             local fatNow = Runtime.getFatigue(playerObj)
             if fatNow then
                 state.realFatigue = fatNow
@@ -464,6 +550,7 @@ function Runtime.tickPlayer(playerObj)
             projectionShapeScale
         )
         state.hiddenFatigue = math.max(0, (state.realFatigue or 0) - targetDisplayed)
+        updateCaffeineStress(playerObj, state, rawStimLoad, dtCap, sleeping, options)
         Runtime.setFatigue(playerObj, targetDisplayed)
         state.lastSetFatigue = targetDisplayed
     end

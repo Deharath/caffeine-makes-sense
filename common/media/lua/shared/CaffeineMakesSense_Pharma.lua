@@ -64,6 +64,38 @@ function Pharma.sleepDisruptionStrength(rawStimLoad, penaltyMax, maxCaffeineLeve
     return clamp(strength * (tonumber(penaltyMax) or 0), 0, 1)
 end
 
+function Pharma.caffeineStressTarget(rawStimLoad, hiddenDebt, options)
+    local load = math.max(0, tonumber(rawStimLoad) or 0)
+    local debt = math.max(0, tonumber(hiddenDebt) or 0)
+    local loadStart = math.max(0, tonumber(options and options.StressLoadStart) or 2.0)
+    local loadMax = math.max(loadStart + 0.01, tonumber(options and options.StressLoadMax) or 4.0)
+    local targetMax = clamp(tonumber(options and options.StressTargetMax) or 0.70, 0, 1)
+    local curvePower = math.max(0.25, tonumber(options and options.StressCurvePower) or 1.35)
+    local debtAmpHidden = math.max(0.01, tonumber(options and options.StressDebtAmpHidden) or 0.25)
+    local debtAmpMax = math.max(0, tonumber(options and options.StressDebtAmpMax) or 0.35)
+
+    if load <= loadStart or targetMax <= 0 then
+        return 0
+    end
+
+    local normalized = clamp((load - loadStart) / (loadMax - loadStart), 0, 1)
+    local baseTarget = targetMax * math.pow(normalized, curvePower)
+    local debtAmp = 1.0 + debtAmpMax * clamp(debt / debtAmpHidden, 0, 1)
+    return clamp(baseTarget * debtAmp, 0, targetMax)
+end
+
+function Pharma.approachValue(current, target, dtMinutes, tauMinutes)
+    local cur = tonumber(current) or 0
+    local tgt = tonumber(target) or 0
+    local dt = math.max(0, tonumber(dtMinutes) or 0)
+    local tau = math.max(0.01, tonumber(tauMinutes) or 1)
+    if dt <= 0 then
+        return cur
+    end
+    local alpha = 1.0 - math.exp(-dt / tau)
+    return cur + (tgt - cur) * alpha
+end
+
 -- Project real fatigue to gameplay-facing fatigue.
 -- The strongest relief lives in the meaningful tired band, where PZ's fatigue
 -- penalties accelerate sharply. Fresh players get little benefit, while very
