@@ -1,0 +1,9 @@
+luac.out
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.bak
+*.orig
+*.swp
+AGENTS.md
