@@ -11,6 +11,7 @@ if not okMpCompat then
     print("[CaffeineMakesSense][MP][SERVER][ERROR] MPCompat require failed: " .. tostring(mpCompatOrErr))
     return
 end
+pcall(require, "CaffeineMakesSense_Compat")
 pcall(require, "CaffeineMakesSense_Pharma")
 pcall(require, "CaffeineMakesSense_Runtime")
 pcall(require, "CaffeineMakesSense_ItemDefs")
@@ -56,6 +57,9 @@ local function buildSnapshot(playerObj)
     local newestProfile = Pharma.getProfileOptions(options, newestProfileKey)
     local onsetMin = tonumber(newestProfile.onsetMinutes) or 0
     local halfLifeMin = tonumber(newestProfile.halfLifeMinutes) or 0
+    local sleepDebug = type(Runtime.buildSleepDebugMetrics) == "function"
+        and Runtime.buildSleepDebugMetrics(state, rawStimLoad, options)
+        or nil
     local displayedFatigue = Runtime.getFatigue(playerObj) or 0
     local realFatigue = tonumber(state.realFatigue) or displayedFatigue
     local hiddenFatigue = math.max(0, tonumber(state.hiddenFatigue) or (realFatigue - displayedFatigue))
@@ -92,7 +96,17 @@ local function buildSnapshot(playerObj)
         caffeineStress = tonumber(state.caffeineStressCurrent) or 0,
         caffeineStressTarget = tonumber(state.caffeineStressTarget) or 0,
         sleepDisruption = math.max(tonumber(state.sleepDisruptionScore) or 0, tonumber(state.lastSleepDisruptionScore) or 0),
-        wakeFatiguePenalty = tonumber(state.lastWakeFatiguePenalty) or 0,
+        sleepRecoveryPenaltyFraction = sleepDebug and sleepDebug.activePenaltyFraction
+            or tonumber(state.lastSleepRecoveryPenaltyFraction)
+            or tonumber(state.sleepRecoveryPenaltyFraction)
+            or 0,
+        projectedSleepRecoveryPenaltyFraction = sleepDebug and sleepDebug.projectedPenaltyFraction
+            or (type(Runtime.computeSleepRecoveryPenaltyFraction) == "function"
+                and Runtime.computeSleepRecoveryPenaltyFraction(rawStimLoad, options))
+            or 0,
+        sleepRecoveryFatigue = sleepDebug and sleepDebug.lastRecoveryFatigue
+            or tonumber(state.lastSleepRecoveryFatigue)
+            or 0,
         displayedFatigue = displayedFatigue,
         realFatigue = realFatigue,
         sleeping = Runtime.isPlayerAsleep(playerObj),

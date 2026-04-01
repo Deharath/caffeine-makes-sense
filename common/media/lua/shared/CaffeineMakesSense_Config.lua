@@ -47,10 +47,9 @@ CaffeineMakesSense.DEFAULTS = {
     -- stimulant load while asleep. This feeds the weighted sleep-session score.
     SleepDisruptionStrengthMax = 0.60,
 
-    -- Maximum real-fatigue remainder added once on wake from the weighted sleep
-    -- disruption score. Visible wake fatigue may still be partially masked by
-    -- active caffeine after this is applied.
-    SleepWakeFatigueMax = 0.12,
+    -- Maximum fraction of vanilla sleep recovery that caffeine can erase while
+    -- asleep. This is a continuous sleep-efficiency penalty, not a wake-time hit.
+    SleepRecoveryPenaltyMaxFrac = 0.20,
 
     -- Acute overstimulation stress is a temporary CMS-owned contribution layered
     -- onto vanilla stress. It starts building below pill-level peak overlap so

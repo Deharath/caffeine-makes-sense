@@ -266,18 +266,18 @@ function Hooks.wrapEatFoodAction()
     end
 
     pcall(require, "TimedActions/ISEatFoodAction")
-    if type(ISEatFoodAction) ~= "table" or type(ISEatFoodAction.complete) ~= "function" then
+    if type(ISEatFoodAction) ~= "table" or type(ISEatFoodAction.perform) ~= "function" then
         return
     end
 
-    local originalComplete = ISEatFoodAction.complete
-    ISEatFoodAction.complete = function(self)
+    local originalPerform = ISEatFoodAction.perform
+    ISEatFoodAction.perform = function(self)
         local item = self and self.item or nil
         local character = self and self.character or nil
         local def = getCaffeineItemDef(item)
         local beforeFatigue = character and CaffeineMakesSense.Runtime and CaffeineMakesSense.Runtime.getFatigue(character) or nil
 
-        local result = originalComplete(self)
+        local result = originalPerform(self)
 
         local afterFatigue = character and CaffeineMakesSense.Runtime and CaffeineMakesSense.Runtime.getFatigue(character) or nil
         if def and beforeFatigue ~= nil and afterFatigue ~= nil and afterFatigue < beforeFatigue then
@@ -288,7 +288,7 @@ function Hooks.wrapEatFoodAction()
     end
 
     CaffeineMakesSense._eatFoodWrapped = true
-    log("wrapped ISEatFoodAction.complete for caffeine fatigue reversal")
+    log("wrapped ISEatFoodAction.perform for caffeine fatigue reversal")
 end
 
 return Hooks

@@ -88,6 +88,18 @@ local function isMultiplayerClient()
     return type(isClient) == "function" and isClient() == true
 end
 
+local function requestMpSnapshot(reason, force)
+    if not isMultiplayerClient() then
+        return false
+    end
+    local MPClient = CaffeineMakesSense.MPClient
+    if not MPClient or type(MPClient.requestSnapshot) ~= "function" then
+        return false
+    end
+    local ok = pcall(MPClient.requestSnapshot, tostring(reason or "dev_panel"), force == true)
+    return ok
+end
+
 local function isPlayerAsleep(player)
     if not player or type(player.isAsleep) ~= "function" then
         return false
@@ -96,9 +108,101 @@ local function isPlayerAsleep(player)
     return ok and asleep == true
 end
 
+local function getRuntime()
+    local runtimeApi = CaffeineMakesSense and CaffeineMakesSense.Runtime or nil
+    if type(runtimeApi) ~= "table" then
+        return nil
+    end
+    return runtimeApi
+end
+
+local function buildPendingSnapshot(player, nowMinutes)
+    local runtimeApi = getRuntime()
+    local options = runtimeApi and type(runtimeApi.getOptions) == "function"
+        and runtimeApi.getOptions()
+        or (CaffeineMakesSense.DEFAULTS or {})
+    local displayedFatigue = player and (getFatigue(player) or 0) or 0
+    return {
+        rawStimLoad = 0,
+        maskLoad = 0,
+        maxCaffeine = tonumber(options.MaxCaffeineLevel) or 4.0,
+        maskStrength = 0,
+        stimFraction = 0,
+        hiddenFatigue = 0,
+        totalStress = player and (getStress(player) or 0) or 0,
+        caffeineStress = 0,
+        caffeineStressTarget = 0,
+        sleepDisruption = 0,
+        sleepRecoveryPenaltyFraction = 0,
+        projectedSleepRecoveryPenaltyFraction = 0,
+        sleepRecoveryFatigue = 0,
+        displayedFatigue = displayedFatigue,
+        realFatigue = displayedFatigue,
+        sleeping = false,
+        sleepSessionMinutes = 0,
+        stage = "pending_snapshot",
+        doseCount = 0,
+        minutesSinceLastDose = nil,
+        timeToTailOnset = nil,
+        onsetMinutes = 0,
+        halfLifeMinutes = 0,
+        profileKey = "pending",
+        updatedMinute = nowMinutes,
+        snapshotAgeMinutes = 0,
+        source = "mp_pending",
+    }
+end
+
+local function enrichMpSnapshot(snapshot, nowMinutes)
+    local now = tonumber(nowMinutes) or getWorldAgeMinutes()
+    local snap = type(snapshot) == "table" and snapshot or {}
+    local enriched = {}
+    for key, value in pairs(snap) do
+        enriched[key] = value
+    end
+
+    enriched.rawStimLoad = tonumber(enriched.rawStimLoad) or 0
+    enriched.maskLoad = tonumber(enriched.maskLoad) or 0
+    enriched.maxCaffeine = tonumber(enriched.maxCaffeine) or 4.0
+    enriched.maskStrength = tonumber(enriched.maskStrength) or 0
+    enriched.stimFraction = tonumber(enriched.stimFraction) or 0
+    enriched.hiddenFatigue = tonumber(enriched.hiddenFatigue) or 0
+    enriched.totalStress = tonumber(enriched.totalStress) or 0
+    enriched.caffeineStress = tonumber(enriched.caffeineStress) or 0
+    enriched.caffeineStressTarget = tonumber(enriched.caffeineStressTarget) or 0
+    enriched.sleepDisruption = tonumber(enriched.sleepDisruption) or 0
+    enriched.sleepRecoveryPenaltyFraction = tonumber(enriched.sleepRecoveryPenaltyFraction) or 0
+    enriched.sleepRecoveryFatigue = tonumber(enriched.sleepRecoveryFatigue) or 0
+    enriched.displayedFatigue = tonumber(enriched.displayedFatigue) or 0
+    enriched.realFatigue = tonumber(enriched.realFatigue) or enriched.displayedFatigue
+    enriched.sleepSessionMinutes = tonumber(enriched.sleepSessionMinutes) or 0
+    enriched.doseCount = tonumber(enriched.doseCount) or 0
+    enriched.updatedMinute = tonumber(enriched.updatedMinute) or now
+    enriched.snapshotAgeMinutes = math.max(0, now - enriched.updatedMinute)
+    enriched.source = tostring(enriched.source or "mp_server")
+    enriched.stage = tostring(enriched.stage or "inactive")
+
+    if enriched.projectedSleepRecoveryPenaltyFraction == nil then
+        local runtimeApi = getRuntime()
+        local projectedPenalty = nil
+        if runtimeApi and type(runtimeApi.computeSleepRecoveryPenaltyFraction) == "function" then
+            local options = type(runtimeApi.getOptions) == "function"
+                and runtimeApi.getOptions()
+                or (CaffeineMakesSense.DEFAULTS or {})
+            projectedPenalty = runtimeApi.computeSleepRecoveryPenaltyFraction(enriched.rawStimLoad, options)
+        end
+        enriched.projectedSleepRecoveryPenaltyFraction = tonumber(projectedPenalty) or 0
+    else
+        enriched.projectedSleepRecoveryPenaltyFraction = tonumber(enriched.projectedSleepRecoveryPenaltyFraction) or 0
+    end
+
+    return enriched
+end
+
 local function computeSnapshot()
     local player = getLocalPlayer()
     if not player then return nil end
+    local now = getWorldAgeMinutes()
 
     if isMultiplayerClient() then
         local MPClient = CaffeineMakesSense.MPClient
@@ -108,9 +212,10 @@ local function computeSnapshot()
         if MPClient and type(MPClient.getSnapshot) == "function" then
             local snap = MPClient.getSnapshot()
             if snap then
-                return snap
+                return enrichMpSnapshot(snap, now)
             end
         end
+        return buildPendingSnapshot(player, now)
     end
 
     local State = CaffeineMakesSense.State
@@ -120,13 +225,16 @@ local function computeSnapshot()
     local state = State.ensureState(player)
     if not state then return nil end
     local options = State.getOptions()
-    local now = getWorldAgeMinutes()
 
     local rawStimLoad, maskLoad = State.getLoadTotals(state, now, options)
     local maxCaffeine = tonumber(options.MaxCaffeineLevel) or 4.0
     local peakMask = tonumber(options.PeakMaskStrength) or 0.85
     local maskStr = Pharma.maskStrength(maskLoad, peakMask, maxCaffeine)
     local negligible = tonumber(options.NegligibleThreshold) or 0.05
+    local runtimeApi = getRuntime()
+    local sleepDebug = runtimeApi and type(runtimeApi.buildSleepDebugMetrics) == "function"
+        and runtimeApi.buildSleepDebugMetrics(state, rawStimLoad, options)
+        or nil
 
     local stimFraction = 0
     local peakStim = state.peakStimThisCycle or 0
@@ -169,8 +277,14 @@ local function computeSnapshot()
         maskStrength = maskStr,
         stimFraction = stimFraction,
         hiddenFatigue = hiddenFatigue,
-        sleepDisruption = math.max(tonumber(state.sleepDisruptionScore) or 0, tonumber(state.lastSleepDisruptionScore) or 0),
-        wakeFatiguePenalty = tonumber(state.lastWakeFatiguePenalty) or 0,
+        sleepDisruption = sleepDebug and sleepDebug.disruptionScore
+            or math.max(tonumber(state.sleepDisruptionScore) or 0, tonumber(state.lastSleepDisruptionScore) or 0),
+        sleepRecoveryPenaltyFraction = sleepDebug and sleepDebug.activePenaltyFraction
+            or tonumber(state.sleepRecoveryPenaltyFraction) or 0,
+        projectedSleepRecoveryPenaltyFraction = sleepDebug and sleepDebug.projectedPenaltyFraction
+            or 0,
+        sleepRecoveryFatigue = sleepDebug and sleepDebug.lastRecoveryFatigue
+            or tonumber(state.lastSleepRecoveryFatigue) or 0,
         displayedFatigue = getFatigue(player) or 0,
         realFatigue = state.realFatigue or (getFatigue(player) or 0),
         totalStress = getStress(player) or 0,
@@ -185,6 +299,9 @@ local function computeSnapshot()
         onsetMinutes = onsetMin,
         halfLifeMinutes = halfLifeMin,
         profileKey = newestProfileKey,
+        updatedMinute = now,
+        snapshotAgeMinutes = 0,
+        source = "local_runtime",
     }
 end
 
@@ -206,10 +323,15 @@ local CSV_HEADER = table.concat({
     "stress_cms_pct",
     "stress_target_pct",
     "sleep_disruption_pct",
-    "wake_fatigue_penalty",
+    "sleep_recovery_penalty_pct",
+    "sleep_projected_penalty_pct",
+    "sleep_recovery_fatigue",
     "sleep_session_min",
     "dose_count",
     "sleeping",
+    "sample_source",
+    "snapshot_updated_min",
+    "snapshot_age_min",
     "event",
     "event_profile",
 }, ",")
@@ -225,34 +347,44 @@ end
 local function recordSample(snap, eventTag, eventProfile)
     if not recording or not snap then return end
     local now = getWorldAgeMinutes()
-    local elapsed = now - (recordStartMinute or now)
+    local sampleMinute = tonumber(snap.updatedMinute) or now
+    local elapsed = math.max(0, sampleMinute - (recordStartMinute or sampleMinute))
     local pre = preFatigue or snap.displayedFatigue
-    recordBuffer[#recordBuffer + 1] = string.format(
-        "%.1f,%.1f,%.0f,%s,%.4f,%.4f,%.1f,%.2f,%.2f,%.5f,%.5f,%.5f,%.5f,%.2f,%.5f,%.1f,%d,%s,%s,%s",
-        elapsed,
-        now,
-        getGameSpeed(),
-        snap.stage,
-        snap.rawStimLoad,
-        snap.maskLoad,
-        snap.maxCaffeine,
-        snap.maskStrength * 100,
-        snap.stimFraction * 100,
-        pre,
-        snap.displayedFatigue,
-        snap.realFatigue,
-        snap.hiddenFatigue,
-        (snap.totalStress or 0) * 100,
-        (snap.caffeineStress or 0) * 100,
-        (snap.caffeineStressTarget or 0) * 100,
-        snap.sleepDisruption * 100,
-        snap.wakeFatiguePenalty,
-        snap.sleepSessionMinutes,
-        snap.doseCount,
+    local snapshotUpdatedMinute = tonumber(snap.updatedMinute) or sampleMinute
+    local snapshotAgeMinutes = tonumber(snap.snapshotAgeMinutes)
+    if snapshotAgeMinutes == nil then
+        snapshotAgeMinutes = math.max(0, now - snapshotUpdatedMinute)
+    end
+    recordBuffer[#recordBuffer + 1] = table.concat({
+        string.format("%.1f", elapsed),
+        string.format("%.1f", sampleMinute),
+        string.format("%.0f", getGameSpeed()),
+        tostring(snap.stage or "inactive"),
+        string.format("%.4f", tonumber(snap.rawStimLoad) or 0),
+        string.format("%.4f", tonumber(snap.maskLoad) or 0),
+        string.format("%.1f", tonumber(snap.maxCaffeine) or 0),
+        string.format("%.2f", (tonumber(snap.maskStrength) or 0) * 100),
+        string.format("%.2f", (tonumber(snap.stimFraction) or 0) * 100),
+        string.format("%.5f", tonumber(pre) or 0),
+        string.format("%.5f", tonumber(snap.displayedFatigue) or 0),
+        string.format("%.5f", tonumber(snap.realFatigue) or 0),
+        string.format("%.5f", tonumber(snap.hiddenFatigue) or 0),
+        string.format("%.2f", (tonumber(snap.totalStress) or 0) * 100),
+        string.format("%.5f", (tonumber(snap.caffeineStress) or 0) * 100),
+        string.format("%.1f", (tonumber(snap.caffeineStressTarget) or 0) * 100),
+        string.format("%.1f", (tonumber(snap.sleepDisruption) or 0) * 100),
+        string.format("%.1f", (tonumber(snap.sleepRecoveryPenaltyFraction) or 0) * 100),
+        string.format("%.1f", (tonumber(snap.projectedSleepRecoveryPenaltyFraction) or 0) * 100),
+        string.format("%.5f", tonumber(snap.sleepRecoveryFatigue) or 0),
+        string.format("%.1f", tonumber(snap.sleepSessionMinutes) or 0),
+        tostring(tonumber(snap.doseCount) or 0),
         tostring(snap.sleeping),
-        eventTag or "",
-        eventProfile or ""
-    )
+        tostring(snap.source or "local_runtime"),
+        string.format("%.1f", snapshotUpdatedMinute),
+        string.format("%.1f", snapshotAgeMinutes),
+        tostring(eventTag or ""),
+        tostring(eventProfile or ""),
+    }, ",")
 end
 
 local function writeRecordingToFile()
@@ -299,11 +431,27 @@ function DevPanel.startRecording(label)
     preFatigue = nil
     recordLabel = label or "session"
     recording = true
+    requestMpSnapshot("record_start", true)
+    local snap = computeSnapshot()
+    if snap then
+        recordSample(snap, "start")
+        lastSampleGameMinute = getWorldAgeMinutes()
+    end
     print(string.format("[CaffeineMakesSense] recording started (label=%s, interval=%dmin)", recordLabel, SAMPLE_INTERVAL_MINUTES))
 end
 
 function DevPanel.stopRecording()
     if not recording then return nil end
+    requestMpSnapshot("record_stop", true)
+    local snap = computeSnapshot()
+    if snap then
+        local now = getWorldAgeMinutes()
+        local last = lastSampleGameMinute
+        if #recordBuffer == 0 or last == nil or math.abs(now - last) > 0.0001 then
+            recordSample(snap, "stop")
+            lastSampleGameMinute = now
+        end
+    end
     recording = false
     local path = writeRecordingToFile()
     local count = #recordBuffer
@@ -337,7 +485,8 @@ function DevPanel.sampleHighFreq()
     if not recording then return end
     local now = getWorldAgeMinutes()
     local last = lastSampleGameMinute or now
-    if (now - last) < SAMPLE_INTERVAL_MINUTES then return end
+    local forceFirst = #recordBuffer == 0
+    if (not forceFirst) and (now - last) < SAMPLE_INTERVAL_MINUTES then return end
     local player = getLocalPlayer()
     if player then
         preFatigue = getFatigue(player)
@@ -583,7 +732,9 @@ function CMS_DevOverlay:render()
     y = drawRow(self, y, "Sleeping", snap.sleeping and "YES" or "NO", snap.sleeping and COLOR_SLEEP or COLOR_DIM)
     y = drawRow(self, y, "Disruption Score", string.format("%.1f%%", snap.sleepDisruption * 100), snap.sleepDisruption > 0 and COLOR_SLEEP or COLOR_DIM)
     y = drawBar(self, y, snap.sleepDisruption, COLOR_SLEEP)
-    y = drawRow(self, y, "Wake Penalty", string.format("%.3f", snap.wakeFatiguePenalty), snap.wakeFatiguePenalty > 0 and COLOR_SLEEP or COLOR_DIM)
+    y = drawRow(self, y, "Projected Penalty", string.format("%.1f%%", (snap.projectedSleepRecoveryPenaltyFraction or 0) * 100), (snap.projectedSleepRecoveryPenaltyFraction or 0) > 0 and COLOR_SLEEP or COLOR_DIM)
+    y = drawRow(self, y, "Active Penalty", string.format("%.1f%%", (snap.sleepRecoveryPenaltyFraction or 0) * 100), (snap.sleepRecoveryPenaltyFraction or 0) > 0 and COLOR_SLEEP or COLOR_DIM)
+    y = drawRow(self, y, "Recovery Loss", string.format("%.4f", snap.sleepRecoveryFatigue or 0), (snap.sleepRecoveryFatigue or 0) > 0 and COLOR_SLEEP or COLOR_DIM)
     y = drawRow(self, y, "Sleep Session", fmtMinutes(snap.sleepSessionMinutes), COLOR_DIM)
 
     y = drawSectionHeader(self, y, "Timing")

@@ -1,8 +1,14 @@
 CaffeineMakesSense = CaffeineMakesSense or {}
 CaffeineMakesSense.Runtime = CaffeineMakesSense.Runtime or {}
 
+require "CaffeineMakesSense_SleepPlanner"
+require "CaffeineMakesSense_HealthStatus"
+
 local Runtime = CaffeineMakesSense.Runtime
 local DEFAULTS = CaffeineMakesSense.DEFAULTS or {}
+local HealthStatus = CaffeineMakesSense.HealthStatus or {}
+local Planner = CaffeineMakesSense.SleepPlanner or {}
+local PROTOCOL = "mscompat-v1"
 
 local function safeCall(target, methodName, ...)
     if not target then
@@ -31,6 +37,36 @@ local function getStateKey()
     return tostring(MP.MOD_STATE_KEY or "CaffeineMakesSenseState")
 end
 
+local function getCompat()
+    local compat = CaffeineMakesSense.Compat or rawget(_G, "MakesSenseCompat")
+    if type(compat) ~= "table" or tostring(compat.protocol) ~= PROTOCOL then
+        return nil
+    end
+    return compat
+end
+
+local function buildTraceSnapshot(playerObj, _args)
+    local state = Runtime.ensureStateForPlayer(playerObj)
+    if not state then
+        return {}
+    end
+
+    return {
+        real_fatigue = tonumber(state.realFatigue) or nil,
+        hidden_fatigue = tonumber(state.hiddenFatigue) or 0,
+        last_set_fatigue = tonumber(state.lastSetFatigue) or nil,
+        last_nms_extra_fatigue = tonumber(state.lastCompatNmsExtraFatigue) or 0,
+        last_ams_sleep_fatigue = tonumber(state.lastCompatAmsSleepFatigue) or 0,
+        last_sleep_recovery_fatigue = tonumber(state.lastSleepRecoveryFatigue) or 0,
+        peak_stim = tonumber(state.peakStimThisCycle) or 0,
+        sleep_disruption_score = tonumber(state.sleepDisruptionScore) or 0,
+        sleep_recovery_penalty_fraction = tonumber(state.lastSleepRecoveryPenaltyFraction)
+            or tonumber(state.sleepRecoveryPenaltyFraction)
+            or 0,
+        caffeine_stress = tonumber(state.caffeineStressCurrent) or 0,
+    }
+end
+
 function Runtime.clamp(value, minimum, maximum)
     return clamp(value, minimum, maximum)
 end
@@ -51,6 +87,25 @@ function Runtime.normalizeProfileKey(profileKey, category)
         return "coffee"
     end
     return "coffee"
+end
+
+do
+    local compat = getCompat()
+    if compat and type(compat.registerProvider) == "function" then
+        compat:registerProvider("CaffeineMakesSense", {
+            capabilities = {
+                fatigue_coordinator = true,
+                sleep_planner_coordinator = true,
+                sleep_planner_penalty_provider = true,
+            },
+            callbacks = {
+                buildTraceSnapshot = buildTraceSnapshot,
+                estimateSleepPlannerPenalty = function(playerObj, args)
+                    return Runtime.computeSleepPlannerPenalty(playerObj, args)
+                end,
+            },
+        })
+    end
 end
 
 function Runtime.getWorldAgeMinutes()
@@ -104,12 +159,15 @@ function Runtime.ensureStateTable(state, nowMinutes)
     state.sleepPeakDisruption = tonumber(state.sleepPeakDisruption) or 0
     state.sleepDisruptionScore = tonumber(state.sleepDisruptionScore) or 0
     state.sleepDisruptionStrength = tonumber(state.sleepDisruptionStrength) or 0
-    state.sleepPendingWakeFatigue = tonumber(state.sleepPendingWakeFatigue) or 0
-    state.lastWakeFatiguePenalty = tonumber(state.lastWakeFatiguePenalty) or 0
+    state.sleepRecoveryPenaltyFraction = clamp(tonumber(state.sleepRecoveryPenaltyFraction) or 0, 0, 0.95)
+    state.lastSleepRecoveryPenaltyFraction = clamp(tonumber(state.lastSleepRecoveryPenaltyFraction) or 0, 0, 0.95)
+    state.lastSleepRecoveryFatigue = tonumber(state.lastSleepRecoveryFatigue) or 0
     state.lastSleepDisruptionScore = tonumber(state.lastSleepDisruptionScore) or 0
     state.caffeineStressCurrent = clamp(tonumber(state.caffeineStressCurrent) or 0, 0, 1)
     state.caffeineStressTarget = clamp(tonumber(state.caffeineStressTarget) or 0, 0, 1)
     state.lastAppliedCaffeineStress = clamp(tonumber(state.lastAppliedCaffeineStress) or 0, 0, 1)
+    state.lastCompatNmsExtraFatigue = tonumber(state.lastCompatNmsExtraFatigue) or 0
+    state.lastCompatAmsSleepFatigue = tonumber(state.lastCompatAmsSleepFatigue) or 0
     return state
 end
 
@@ -289,8 +347,9 @@ function Runtime.resetState(state, restoredFatigue)
     state.sleepPeakDisruption = 0
     state.sleepDisruptionScore = 0
     state.sleepDisruptionStrength = 0
-    state.sleepPendingWakeFatigue = 0
-    state.lastWakeFatiguePenalty = 0
+    state.sleepRecoveryPenaltyFraction = 0
+    state.lastSleepRecoveryPenaltyFraction = 0
+    state.lastSleepRecoveryFatigue = 0
     state.lastSleepDisruptionScore = 0
     state.caffeineStressCurrent = 0
     state.caffeineStressTarget = 0
@@ -307,7 +366,7 @@ local function clearSleepSession(state)
     state.sleepPeakDisruption = 0
     state.sleepDisruptionScore = 0
     state.sleepDisruptionStrength = 0
-    state.sleepPendingWakeFatigue = 0
+    state.sleepRecoveryPenaltyFraction = 0
 end
 
 local function updateCaffeineStress(playerObj, state, rawStimLoad, dtMinutes, sleeping, options)
@@ -354,6 +413,72 @@ function Runtime.beginSleepSession(playerObj, state, nowMinutes)
     state.wasSleeping = true
     state.sleepStartMinute = now
     state.sleepLastAccumMinute = now
+    state.lastSleepRecoveryFatigue = 0
+end
+
+function Runtime.computeSleepDisruptionStrength(rawStimLoad, options)
+    local Pharma = CaffeineMakesSense.Pharma
+    if not Pharma then
+        return 0
+    end
+    local maxCaffeine = tonumber(options and options.MaxCaffeineLevel) or 4.0
+    local disruptionMax = tonumber(options and options.SleepDisruptionStrengthMax) or 0.60
+    return Pharma.sleepDisruptionStrength(rawStimLoad, disruptionMax, maxCaffeine)
+end
+
+function Runtime.computeSleepRecoveryPenaltyFraction(rawStimLoad, options)
+    local Pharma = CaffeineMakesSense.Pharma
+    if not Pharma then
+        return 0
+    end
+    local meaningfulThreshold = type(HealthStatus.getMeaningfulLoadThreshold) == "function"
+        and tonumber(HealthStatus.getMeaningfulLoadThreshold(options))
+        or nil
+    if meaningfulThreshold ~= nil and rawStimLoad < meaningfulThreshold then
+        return 0
+    end
+    local maxCaffeine = tonumber(options and options.MaxCaffeineLevel) or 4.0
+    local penaltyMax = tonumber(options and options.SleepRecoveryPenaltyMaxFrac) or 0.20
+    return Pharma.sleepDisruptionStrength(rawStimLoad, penaltyMax, maxCaffeine)
+end
+
+function Runtime.buildSleepDebugMetrics(state, rawStimLoad, options)
+    local resolvedState = type(state) == "table" and state or {}
+    return {
+        disruptionScore = math.max(
+            tonumber(resolvedState.sleepDisruptionScore) or 0,
+            tonumber(resolvedState.lastSleepDisruptionScore) or 0
+        ),
+        projectedPenaltyFraction = Runtime.computeSleepRecoveryPenaltyFraction(rawStimLoad, options),
+        activePenaltyFraction = clamp(tonumber(resolvedState.sleepRecoveryPenaltyFraction) or 0, 0, 0.95),
+        lastRecoveryFatigue = tonumber(resolvedState.lastSleepRecoveryFatigue) or 0,
+    }
+end
+
+function Runtime.computeSleepPlannerPenalty(playerObj, _args)
+    if not playerObj then
+        return { penaltyFraction = 0 }
+    end
+
+    local nowMinutes = Runtime.getWorldAgeMinutes()
+    local state = Runtime.ensureStateForPlayer(playerObj, nowMinutes)
+    if not state then
+        return { penaltyFraction = 0 }
+    end
+
+    local options = Runtime.getOptions()
+    local rawStimLoad = Runtime.getLoadTotals(state, nowMinutes, options)
+    local recoveryPenalty = Runtime.computeSleepRecoveryPenaltyFraction(rawStimLoad, options)
+    local plannerPenalty = recoveryPenalty
+    if type(Planner.computePlannerPenaltyFraction) == "function" then
+        plannerPenalty = tonumber(Planner.computePlannerPenaltyFraction(recoveryPenalty, rawStimLoad, options)) or 0
+    end
+
+    return {
+        penaltyFraction = clamp(plannerPenalty, 0, 0.95),
+        recoveryPenaltyFraction = clamp(recoveryPenalty, 0, 0.95),
+        rawStimLoad = rawStimLoad,
+    }
 end
 
 function Runtime.accumulateSleepDisruption(playerObj, state, nowMinutes, dtMinutes, options)
@@ -368,10 +493,8 @@ function Runtime.accumulateSleepDisruption(playerObj, state, nowMinutes, dtMinut
         return
     end
 
-    local maxCaffeine = tonumber(options.MaxCaffeineLevel) or 4.0
-    local disruptionMax = tonumber(options.SleepDisruptionStrengthMax) or 0.60
     local rawStimLoad = Runtime.getLoadTotals(state, now, options)
-    local instantDisruption = Pharma.sleepDisruptionStrength(rawStimLoad, disruptionMax, maxCaffeine)
+    local instantDisruption = Runtime.computeSleepDisruptionStrength(rawStimLoad, options)
     local sleepStart = tonumber(state.sleepStartMinute) or now
     local minutesAsleep = math.max(0, now - sleepStart)
     local earlyWeight = 0.35 + 0.65 * math.exp(-minutesAsleep / 180.0)
@@ -381,8 +504,7 @@ function Runtime.accumulateSleepDisruption(playerObj, state, nowMinutes, dtMinut
     state.sleepPeakDisruption = math.max(tonumber(state.sleepPeakDisruption) or 0, instantDisruption)
     state.sleepDisruptionStrength = instantDisruption
     state.sleepDisruptionScore = (state.sleepWeightedDisruption or 0) / math.max(0.01, state.sleepWeightedMinutes or 0)
-    local wakeFatigueMax = tonumber(options.SleepWakeFatigueMax) or 0.12
-    state.sleepPendingWakeFatigue = clamp((state.sleepDisruptionScore or 0) * wakeFatigueMax, 0, wakeFatigueMax)
+    state.sleepRecoveryPenaltyFraction = Runtime.computeSleepRecoveryPenaltyFraction(rawStimLoad, options)
     state.sleepLastAccumMinute = now
 end
 
@@ -402,16 +524,11 @@ function Runtime.finalizeSleepSession(playerObj, state, nowMinutes, options)
     end
     local now = tonumber(nowMinutes) or Runtime.getWorldAgeMinutes()
     Runtime.accumulateSleepToTime(playerObj, state, now, options)
-    local wakeFatigueMax = tonumber(options.SleepWakeFatigueMax) or 0.12
     state.lastSleepDisruptionScore = tonumber(state.sleepDisruptionScore) or 0
-    local wakePenalty = clamp(tonumber(state.sleepPendingWakeFatigue) or 0, 0, wakeFatigueMax)
-    state.lastWakeFatiguePenalty = wakePenalty
-    if wakePenalty > 0 then
-        state.realFatigue = clamp((state.realFatigue or 0) + wakePenalty, 0, 1)
-    end
+    state.lastSleepRecoveryPenaltyFraction = clamp(tonumber(state.sleepRecoveryPenaltyFraction) or 0, 0, 0.95)
     clearSleepSession(state)
     state.wasSleeping = false
-    return wakePenalty
+    return 0
 end
 
 function Runtime.onSleepingTick(playerObj)
@@ -465,6 +582,12 @@ function Runtime.tickPlayer(playerObj)
     local projectionShapeScale = tonumber(options.ProjectionShapeScale) or 3.0
     local wasSleeping = state.wasSleeping == true
     local sleeping = Runtime.isPlayerAsleep(playerObj)
+    local compat = getCompat()
+    local nmsFatigueCallback = compat and compat.getCallback and compat:getCallback("NutritionMakesSense", "computeFatigueContribution") or nil
+    local amsSleepPenaltyCallback = compat and compat.getCallback and compat:getCallback("ArmorMakesSense", "computeSleepPenaltyContribution") or nil
+    local cycleNmsExtraFatigue = 0
+    local cycleAmsSleepFatigue = 0
+    local cycleSleepRecoveryFatigue = 0
 
     if sleeping and not wasSleeping then
         Runtime.beginSleepSession(playerObj, state, nowMinutes)
@@ -496,6 +619,61 @@ function Runtime.tickPlayer(playerObj)
         end
 
         state.realFatigue = clamp((state.realFatigue or displayedFatigue) + vanillaDeltaSlice, 0, 1)
+        if (not sleeping) and type(nmsFatigueCallback) == "function" then
+            local okCompat, fatigueContribution = pcall(nmsFatigueCallback, playerObj, {
+                dtMinutes = dt,
+                dtHours = dt / 60.0,
+                sleeping = false,
+                currentFatigue = state.realFatigue,
+            })
+            if okCompat and type(fatigueContribution) == "table" then
+                local compatExtraFatigue = math.max(0, tonumber(fatigueContribution.extraFatigue) or 0)
+                if compatExtraFatigue > 0 then
+                    cycleNmsExtraFatigue = cycleNmsExtraFatigue + compatExtraFatigue
+                    state.realFatigue = clamp((state.realFatigue or displayedFatigue) + compatExtraFatigue, 0, 0.95)
+                end
+            end
+        end
+        if sleeping then
+            local recoveredFatigue = math.max(0, -vanillaDeltaSlice)
+            local cmsPenaltyFraction = clamp(tonumber(state.sleepRecoveryPenaltyFraction) or 0, 0, 0.95)
+            local amsPenaltyFraction = 0
+
+            if type(amsSleepPenaltyCallback) == "function" then
+                local okCompat, sleepContribution = pcall(amsSleepPenaltyCallback, playerObj, {
+                    dtMinutes = dt,
+                    currentFatigue = state.realFatigue,
+                    recoveredFatigue = recoveredFatigue,
+                })
+                if okCompat and type(sleepContribution) == "table" then
+                    amsPenaltyFraction = clamp(tonumber(sleepContribution.penaltyFraction) or 0, 0, 0.95)
+                end
+            end
+
+            if recoveredFatigue > 0 then
+                local combinedPenalty = 0
+                if compat and type(compat.combinePenaltyFractions) == "function" then
+                    combinedPenalty = compat.combinePenaltyFractions({
+                        cmsPenaltyFraction,
+                        amsPenaltyFraction,
+                    })
+                else
+                    combinedPenalty = clamp(cmsPenaltyFraction + amsPenaltyFraction, 0, 0.95)
+                end
+
+                if combinedPenalty > 0 then
+                    local compatExtraFatigue = recoveredFatigue * combinedPenalty
+                    local rawPenaltyTotal = cmsPenaltyFraction + amsPenaltyFraction
+                    if rawPenaltyTotal > 0 then
+                        cycleSleepRecoveryFatigue = cycleSleepRecoveryFatigue
+                            + (compatExtraFatigue * (cmsPenaltyFraction / rawPenaltyTotal))
+                        cycleAmsSleepFatigue = cycleAmsSleepFatigue
+                            + (compatExtraFatigue * (amsPenaltyFraction / rawPenaltyTotal))
+                    end
+                    state.realFatigue = clamp((state.realFatigue or displayedFatigue) + compatExtraFatigue, 0, 0.95)
+                end
+            end
+        end
 
         if rawStimLoad > (state.peakStimThisCycle or 0) then
             state.peakStimThisCycle = rawStimLoad
@@ -525,7 +703,7 @@ function Runtime.tickPlayer(playerObj)
             state.peakStimThisCycle = 0
             state.sleepDisruptionStrength = 0
             state.sleepDisruptionScore = 0
-            state.sleepPendingWakeFatigue = 0
+            state.sleepRecoveryPenaltyFraction = 0
             state.caffeineStressTarget = 0
             local fatNow = Runtime.getFatigue(playerObj)
             if fatNow then
@@ -557,6 +735,9 @@ function Runtime.tickPlayer(playerObj)
 
     state.wasSleeping = sleeping
     state.pendingCatchupMinutes = math.max(0, pendingMinutes)
+    state.lastCompatNmsExtraFatigue = cycleNmsExtraFatigue
+    state.lastCompatAmsSleepFatigue = cycleAmsSleepFatigue
+    state.lastSleepRecoveryFatigue = cycleSleepRecoveryFatigue
     Runtime.pruneDoses(state, nowMinutes, options)
 end
 

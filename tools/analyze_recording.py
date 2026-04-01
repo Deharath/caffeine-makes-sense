@@ -69,7 +69,8 @@ def normalize_row(row):
         "stress_cms_pct": to_float(row.get("stress_cms_pct")),
         "stress_target_pct": to_float(row.get("stress_target_pct")),
         "sleep_disruption_pct": to_float(row.get("sleep_disruption_pct", row.get("sleep_penalty_pct"))),
-        "wake_fatigue_penalty": to_float(row.get("wake_fatigue_penalty")),
+        "sleep_recovery_penalty_pct": to_float(row.get("sleep_recovery_penalty_pct")),
+        "sleep_recovery_fatigue": to_float(row.get("sleep_recovery_fatigue")),
         "sleep_session_min": to_float(row.get("sleep_session_min")),
         "dose_count": to_int(row.get("dose_count")),
         "sleeping": to_bool(row.get("sleeping")),
@@ -133,7 +134,8 @@ def build_summary(path, rows):
     peak_stress_cms = max(rows, key=lambda r: r["stress_cms_pct"])
     peak_stress_target = max(rows, key=lambda r: r["stress_target_pct"])
     peak_sleep = max(rows, key=lambda r: r["sleep_disruption_pct"])
-    peak_wake_penalty = max(rows, key=lambda r: r["wake_fatigue_penalty"])
+    peak_sleep_recovery_penalty = max(rows, key=lambda r: r["sleep_recovery_penalty_pct"])
+    peak_sleep_recovery_fatigue = max(rows, key=lambda r: r["sleep_recovery_fatigue"])
     min_fatigue = min(rows, key=lambda r: r["fatigue_post"])
     max_fatigue = max(rows, key=lambda r: r["fatigue_post"])
 
@@ -154,7 +156,8 @@ def build_summary(path, rows):
                 "stress_cms_pct_sum": 0.0,
                 "stress_target_pct_sum": 0.0,
                 "sleep_disruption_pct_sum": 0.0,
-                "wake_fatigue_penalty_sum": 0.0,
+                "sleep_recovery_penalty_pct_sum": 0.0,
+                "sleep_recovery_fatigue_sum": 0.0,
             },
         )
         bucket["rows"] += 1
@@ -167,7 +170,8 @@ def build_summary(path, rows):
         bucket["stress_cms_pct_sum"] += row["stress_cms_pct"]
         bucket["stress_target_pct_sum"] += row["stress_target_pct"]
         bucket["sleep_disruption_pct_sum"] += row["sleep_disruption_pct"]
-        bucket["wake_fatigue_penalty_sum"] += row["wake_fatigue_penalty"]
+        bucket["sleep_recovery_penalty_pct_sum"] += row["sleep_recovery_penalty_pct"]
+        bucket["sleep_recovery_fatigue_sum"] += row["sleep_recovery_fatigue"]
 
     for stage, bucket in stage_means.items():
         rows_n = max(1, bucket["rows"])
@@ -183,7 +187,8 @@ def build_summary(path, rows):
             "stress_cms_pct_avg": bucket["stress_cms_pct_sum"] / rows_n,
             "stress_target_pct_avg": bucket["stress_target_pct_sum"] / rows_n,
             "sleep_disruption_pct_avg": bucket["sleep_disruption_pct_sum"] / rows_n,
-            "wake_fatigue_penalty_avg": bucket["wake_fatigue_penalty_sum"] / rows_n,
+            "sleep_recovery_penalty_pct_avg": bucket["sleep_recovery_penalty_pct_sum"] / rows_n,
+            "sleep_recovery_fatigue_avg": bucket["sleep_recovery_fatigue_sum"] / rows_n,
         }
 
     return {
@@ -235,9 +240,12 @@ def build_summary(path, rows):
             "peak_pct": peak_sleep["sleep_disruption_pct"],
             "peak_at_elapsed_min": peak_sleep["elapsed_min"],
             "end_pct": last["sleep_disruption_pct"],
-            "peak_wake_penalty": peak_wake_penalty["wake_fatigue_penalty"],
-            "peak_wake_penalty_at_elapsed_min": peak_wake_penalty["elapsed_min"],
-            "end_wake_penalty": last["wake_fatigue_penalty"],
+            "peak_recovery_penalty_pct": peak_sleep_recovery_penalty["sleep_recovery_penalty_pct"],
+            "peak_recovery_penalty_at_elapsed_min": peak_sleep_recovery_penalty["elapsed_min"],
+            "end_recovery_penalty_pct": last["sleep_recovery_penalty_pct"],
+            "peak_recovery_fatigue": peak_sleep_recovery_fatigue["sleep_recovery_fatigue"],
+            "peak_recovery_fatigue_at_elapsed_min": peak_sleep_recovery_fatigue["elapsed_min"],
+            "end_recovery_fatigue": last["sleep_recovery_fatigue"],
             "sleeping_rows": sum(1 for row in rows if row["sleeping"]),
         },
         "events": events,
@@ -280,7 +288,8 @@ def select_sample_rows(rows, limit):
             "stress_cms_pct": row["stress_cms_pct"],
             "stress_target_pct": row["stress_target_pct"],
             "sleep_disruption_pct": row["sleep_disruption_pct"],
-            "wake_fatigue_penalty": row["wake_fatigue_penalty"],
+            "sleep_recovery_penalty_pct": row["sleep_recovery_penalty_pct"],
+            "sleep_recovery_fatigue": row["sleep_recovery_fatigue"],
             "event": row["event"] or None,
             "event_profile": row["event_profile"] or None,
         }
@@ -335,8 +344,10 @@ def print_text(summary):
         "sleep_disruption:"
         f" peak_pct={fmt_num(sleep['peak_pct'], 2)}@{fmt_num(sleep['peak_at_elapsed_min'], 1)}"
         f" end_pct={fmt_num(sleep['end_pct'], 2)}"
-        f" peak_wake_penalty={fmt_num(sleep['peak_wake_penalty'], 4)}@{fmt_num(sleep['peak_wake_penalty_at_elapsed_min'], 1)}"
-        f" end_wake_penalty={fmt_num(sleep['end_wake_penalty'], 4)}"
+        f" peak_recovery_penalty={fmt_num(sleep['peak_recovery_penalty_pct'], 2)}@{fmt_num(sleep['peak_recovery_penalty_at_elapsed_min'], 1)}"
+        f" end_recovery_penalty={fmt_num(sleep['end_recovery_penalty_pct'], 2)}"
+        f" peak_recovery_loss={fmt_num(sleep['peak_recovery_fatigue'], 4)}@{fmt_num(sleep['peak_recovery_fatigue_at_elapsed_min'], 1)}"
+        f" end_recovery_loss={fmt_num(sleep['end_recovery_fatigue'], 4)}"
         f" sleeping_rows={sleep['sleeping_rows']}"
     )
 
@@ -378,7 +389,8 @@ def print_text(summary):
                 f" stress_total_avg={fmt_num(data['stress_total_pct_avg'], 2)}"
                 f" stress_cms_avg={fmt_num(data['stress_cms_pct_avg'], 2)}"
                 f" sleep_disruption_avg={fmt_num(data['sleep_disruption_pct_avg'], 2)}"
-                f" wake_penalty_avg={fmt_num(data['wake_fatigue_penalty_avg'], 4)}"
+                f" recovery_penalty_avg={fmt_num(data['sleep_recovery_penalty_pct_avg'], 2)}"
+                f" recovery_loss_avg={fmt_num(data['sleep_recovery_fatigue_avg'], 4)}"
             )
 
     if summary["sample_rows"]:
@@ -399,7 +411,8 @@ def print_text(summary):
                 f" stress_cms={fmt_num(row['stress_cms_pct'], 2)}"
                 f" stress_target={fmt_num(row['stress_target_pct'], 2)}"
                 f" sleep_disruption={fmt_num(row['sleep_disruption_pct'], 2)}"
-                f" wake_penalty={fmt_num(row['wake_fatigue_penalty'], 4)}"
+                f" recovery_penalty={fmt_num(row['sleep_recovery_penalty_pct'], 2)}"
+                f" recovery_loss={fmt_num(row['sleep_recovery_fatigue'], 4)}"
                 f"{event}"
             )
 

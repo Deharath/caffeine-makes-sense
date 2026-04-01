@@ -2,17 +2,22 @@ CaffeineMakesSense = CaffeineMakesSense or {}
 
 require "CaffeineMakesSense_Config"
 pcall(require, "CaffeineMakesSense_MPCompat")
+pcall(require, "CaffeineMakesSense_Compat")
 pcall(require, "CaffeineMakesSense_ItemDefs")
 require "CaffeineMakesSense_Pharma"
 require "CaffeineMakesSense_Boot"
 require "CaffeineMakesSense_State"
 require "CaffeineMakesSense_Tick"
 require "CaffeineMakesSense_Hooks"
+require "CaffeineMakesSense_SleepHooks"
+require "CaffeineMakesSense_HealthPanelHook"
 pcall(require, "CaffeineMakesSense_MPClientRuntime")
 
 local State = CaffeineMakesSense.State
 local Tick = CaffeineMakesSense.Tick
 local Hooks = CaffeineMakesSense.Hooks
+local SleepHooks = CaffeineMakesSense.SleepHooks
+local HealthPanelHook = CaffeineMakesSense.HealthPanelHook
 local MP = CaffeineMakesSense.MP or {}
 local ItemDefs = CaffeineMakesSense.ItemDefs or {}
 local Runtime = CaffeineMakesSense.Runtime
@@ -104,6 +109,12 @@ local function onGameBoot()
         registerOnEatCallbacks()
         Hooks.wrapDrinkFluidAction()
         Hooks.wrapEatFoodAction()
+        if SleepHooks and type(SleepHooks.wrapSleepPlanning) == "function" then
+            SleepHooks.wrapSleepPlanning()
+        end
+        if HealthPanelHook and type(HealthPanelHook.install) == "function" then
+            HealthPanelHook.install()
+        end
         tryLoadDevPanel()
     end)
     if not ok then
@@ -123,11 +134,14 @@ local function onEveryOneMinute()
         if not player then
             return
         end
-        if isMultiplayer() then
-            return
-        end
         local DevPanel = CaffeineMakesSense.DevPanel
         local isRec = DevPanel and DevPanel.isRecording and DevPanel.isRecording()
+        if isMultiplayer() then
+            if isRec then
+                DevPanel.sampleTick()
+            end
+            return
+        end
         if isRec then
             DevPanel.capturePreTick()
         end
