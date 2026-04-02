@@ -95,7 +95,8 @@ local function buildSnapshot(playerObj)
         totalStress = totalStress,
         caffeineStress = tonumber(state.caffeineStressCurrent) or 0,
         caffeineStressTarget = tonumber(state.caffeineStressTarget) or 0,
-        sleepDisruption = math.max(tonumber(state.sleepDisruptionScore) or 0, tonumber(state.lastSleepDisruptionScore) or 0),
+        sleepDisruption = sleepDebug and tonumber(sleepDebug.disruptionScore)
+            or math.max(tonumber(state.sleepDisruptionScore) or 0, tonumber(state.lastSleepDisruptionScore) or 0),
         sleepRecoveryPenaltyFraction = sleepDebug and sleepDebug.activePenaltyFraction
             or tonumber(state.lastSleepRecoveryPenaltyFraction)
             or tonumber(state.sleepRecoveryPenaltyFraction)
@@ -150,6 +151,15 @@ local function resetPlayerState(playerObj)
     return true
 end
 
+local function setPlayerFatigueTarget(playerObj, targetFraction)
+    local nowMinutes = Runtime.getWorldAgeMinutes()
+    local state = Runtime.ensureStateForPlayer(playerObj, nowMinutes)
+    if not state then
+        return nil
+    end
+    return Runtime.applyCanonicalFatigueTarget(playerObj, state, targetFraction)
+end
+
 local function registerOnEatCallbacks()
     local sm = ScriptManager and ScriptManager.instance
     local ItemDefs = CaffeineMakesSense.ItemDefs or {}
@@ -192,6 +202,20 @@ local function onClientCommand(module, command, playerObj, args)
                 log(string.format("reset from client: player=%s",
                     tostring(Runtime.safeCall(playerObj, "getUsername") or "unknown")))
                 sendSnapshot(playerObj, "reset")
+            end
+            return
+        end
+        if tostring(command) == tostring(MP.SET_FATIGUE_COMMAND) then
+            local targetFraction = tonumber(args and args.target_fatigue) or 0
+            local applied = setPlayerFatigueTarget(playerObj, targetFraction)
+            if applied then
+                log(string.format(
+                    "set fatigue target from client: player=%s real=%.1f%% displayed=%.1f%%",
+                    tostring(Runtime.safeCall(playerObj, "getUsername") or "unknown"),
+                    (tonumber(applied.realFatigue) or 0) * 100,
+                    (tonumber(applied.displayedFatigue) or 0) * 100
+                ))
+                sendSnapshot(playerObj, "set_fatigue")
             end
             return
         end

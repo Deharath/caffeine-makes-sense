@@ -9,14 +9,12 @@ require "CaffeineMakesSense_Boot"
 require "CaffeineMakesSense_State"
 require "CaffeineMakesSense_Tick"
 require "CaffeineMakesSense_Hooks"
-require "CaffeineMakesSense_SleepHooks"
 require "CaffeineMakesSense_HealthPanelHook"
 pcall(require, "CaffeineMakesSense_MPClientRuntime")
 
 local State = CaffeineMakesSense.State
 local Tick = CaffeineMakesSense.Tick
 local Hooks = CaffeineMakesSense.Hooks
-local SleepHooks = CaffeineMakesSense.SleepHooks
 local HealthPanelHook = CaffeineMakesSense.HealthPanelHook
 local MP = CaffeineMakesSense.MP or {}
 local ItemDefs = CaffeineMakesSense.ItemDefs or {}
@@ -24,6 +22,7 @@ local Runtime = CaffeineMakesSense.Runtime
 
 local runtimeDisabled = false
 local bootLogged = false
+local sleepHooksInstallResolved = false
 
 local TAG = "[CaffeineMakesSense]"
 local DEV_PANEL_HOTKEY = Keyboard and Keyboard.KEY_NUMPAD6 or nil
@@ -73,6 +72,35 @@ local function isMultiplayer()
     return false
 end
 
+local function isEligibleLocalPlayer(playerObj)
+    if not playerObj then
+        return false
+    end
+    if type(playerObj.isLocalPlayer) == "function" then
+        local ok, isLocal = pcall(playerObj.isLocalPlayer, playerObj)
+        if ok and not isLocal then
+            return false
+        end
+    end
+    return true
+end
+
+local function tryInstallSleepHooks(playerObj)
+    if sleepHooksInstallResolved then
+        return
+    end
+    if not isEligibleLocalPlayer(playerObj) then
+        return
+    end
+    local okSleepHooks = pcall(require, "CaffeineMakesSense_SleepHooks")
+    local SleepHooks = okSleepHooks and CaffeineMakesSense.SleepHooks or nil
+    if SleepHooks and type(SleepHooks.wrapSleepPlanning) == "function" then
+        SleepHooks.wrapSleepPlanning()
+        log("sleep planner hooks installed after confirmed local player creation")
+    end
+    sleepHooksInstallResolved = true
+end
+
 -- Register OnEat callbacks on caffeine items at boot.
 -- This sets the Lua callback name so PZ calls CMS_OnEatCaffeine when the item is consumed.
 local function registerOnEatCallbacks()
@@ -109,9 +137,6 @@ local function onGameBoot()
         registerOnEatCallbacks()
         Hooks.wrapDrinkFluidAction()
         Hooks.wrapEatFoodAction()
-        if SleepHooks and type(SleepHooks.wrapSleepPlanning) == "function" then
-            SleepHooks.wrapSleepPlanning()
-        end
         if HealthPanelHook and type(HealthPanelHook.install) == "function" then
             HealthPanelHook.install()
         end
@@ -172,6 +197,7 @@ local function onCreatePlayer(playerIndex, playerObj)
                 #(state.doses or {}),
                 tostring(isMultiplayer())))
         end
+        tryInstallSleepHooks(player)
     end)
     if not ok then
         logError("onCreatePlayer", err)

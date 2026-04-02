@@ -108,6 +108,73 @@ local function isPlayerAsleep(player)
     return ok and asleep == true
 end
 
+local function safeField(target, fieldName)
+    if not target then
+        return nil
+    end
+    local ok, value = pcall(function()
+        return target[fieldName]
+    end)
+    if not ok then
+        return nil
+    end
+    return value
+end
+
+local function safeCall(target, methodName, ...)
+    if not target then
+        return nil
+    end
+    local fn = safeField(target, methodName)
+    if type(fn) ~= "function" then
+        return nil
+    end
+    local ok, result = pcall(fn, target, ...)
+    if not ok then
+        return nil
+    end
+    return result
+end
+
+local function getUiGameSpeed()
+    local controls = nil
+    if UIManager then
+        if type(UIManager.getSpeedControls) == "function" then
+            local ok, resolved = pcall(UIManager.getSpeedControls)
+            if ok then
+                controls = resolved
+            end
+        end
+        if not controls then
+            controls = safeField(UIManager, "speedControls")
+        end
+    end
+    if not controls then
+        return nil
+    end
+    local current = safeCall(controls, "getCurrentGameSpeed")
+    return tonumber(current)
+end
+
+local function isClientFastForwarding()
+    return safeField(GameClient, "fastForward") == true
+end
+
+local function appendLocalObservation(snapshot, player)
+    if type(snapshot) ~= "table" then
+        return snapshot
+    end
+    local localSleeping = isPlayerAsleep(player)
+    snapshot.serverSleeping = snapshot.serverSleeping == true or snapshot.sleeping == true
+    snapshot.localSleeping = localSleeping
+    snapshot.clientFastForward = isClientFastForwarding()
+    snapshot.uiGameSpeed = getUiGameSpeed()
+    snapshot.localForceWakeUpTime = tonumber(player and safeCall(player, "getForceWakeUpTime") or nil) or -1
+    snapshot.localAsleepTime = tonumber(player and safeCall(player, "getAsleepTime") or nil) or 0
+    snapshot.localDisplayedFatigue = tonumber(player and getFatigue(player) or nil) or 0
+    return snapshot
+end
+
 local function getRuntime()
     local runtimeApi = CaffeineMakesSense and CaffeineMakesSense.Runtime or nil
     if type(runtimeApi) ~= "table" then
@@ -139,6 +206,7 @@ local function buildPendingSnapshot(player, nowMinutes)
         displayedFatigue = displayedFatigue,
         realFatigue = displayedFatigue,
         sleeping = false,
+        serverSleeping = false,
         sleepSessionMinutes = 0,
         stage = "pending_snapshot",
         doseCount = 0,
@@ -181,6 +249,7 @@ local function enrichMpSnapshot(snapshot, nowMinutes)
     enriched.snapshotAgeMinutes = math.max(0, now - enriched.updatedMinute)
     enriched.source = tostring(enriched.source or "mp_server")
     enriched.stage = tostring(enriched.stage or "inactive")
+    enriched.serverSleeping = enriched.sleeping == true
 
     if enriched.projectedSleepRecoveryPenaltyFraction == nil then
         local runtimeApi = getRuntime()
@@ -212,10 +281,10 @@ local function computeSnapshot()
         if MPClient and type(MPClient.getSnapshot) == "function" then
             local snap = MPClient.getSnapshot()
             if snap then
-                return enrichMpSnapshot(snap, now)
+                return appendLocalObservation(enrichMpSnapshot(snap, now), player)
             end
         end
-        return buildPendingSnapshot(player, now)
+        return appendLocalObservation(buildPendingSnapshot(player, now), player)
     end
 
     local State = CaffeineMakesSense.State
@@ -270,7 +339,7 @@ local function computeSnapshot()
         timeToTailOnset = math.max(0, totalDecayToThreshold - minutesPastPeak)
     end
 
-    return {
+    return appendLocalObservation({
         rawStimLoad = rawStimLoad,
         maskLoad = maskLoad,
         maxCaffeine = maxCaffeine,
@@ -302,7 +371,7 @@ local function computeSnapshot()
         updatedMinute = now,
         snapshotAgeMinutes = 0,
         source = "local_runtime",
-    }
+    }, player)
 end
 
 local CSV_HEADER = table.concat({
@@ -329,6 +398,13 @@ local CSV_HEADER = table.concat({
     "sleep_session_min",
     "dose_count",
     "sleeping",
+    "server_sleeping",
+    "local_sleeping",
+    "client_fast_forward",
+    "ui_speed",
+    "force_wake_time",
+    "asleep_time_h",
+    "local_fatigue",
     "sample_source",
     "snapshot_updated_min",
     "snapshot_age_min",
@@ -379,6 +455,13 @@ local function recordSample(snap, eventTag, eventProfile)
         string.format("%.1f", tonumber(snap.sleepSessionMinutes) or 0),
         tostring(tonumber(snap.doseCount) or 0),
         tostring(snap.sleeping),
+        tostring(snap.serverSleeping == true),
+        tostring(snap.localSleeping == true),
+        tostring(snap.clientFastForward == true),
+        tostring(tonumber(snap.uiGameSpeed) or -1),
+        string.format("%.2f", tonumber(snap.localForceWakeUpTime) or -1),
+        string.format("%.2f", tonumber(snap.localAsleepTime) or 0),
+        string.format("%.5f", tonumber(snap.localDisplayedFatigue) or 0),
         tostring(snap.source or "local_runtime"),
         string.format("%.1f", snapshotUpdatedMinute),
         string.format("%.1f", snapshotAgeMinutes),
@@ -557,6 +640,52 @@ function DevPanel.reset()
     print("[CaffeineMakesSense] reset: all caffeine state cleared")
 end
 
+function DevPanel.setFatigueTarget(targetFraction)
+    local player = getLocalPlayer()
+    if not player then
+        print("[CaffeineMakesSense] set fatigue: no player")
+        return
+    end
+
+    local target = clamp(targetFraction or 0, 0, 1)
+    if isMultiplayerClient() then
+        local MPClient = CaffeineMakesSense.MPClient
+        if MPClient and type(MPClient.requestSetFatigue) == "function" then
+            local ok = pcall(MPClient.requestSetFatigue, target, "dev_panel")
+            if ok then
+                print(string.format("[CaffeineMakesSense] set fatigue requested from server: %.0f%%", target * 100))
+            else
+                print("[CaffeineMakesSense] set fatigue request failed")
+            end
+            return
+        end
+    end
+
+    local State = CaffeineMakesSense.State
+    local Runtime = CaffeineMakesSense.Runtime
+    if not State or not Runtime or type(Runtime.applyCanonicalFatigueTarget) ~= "function" then
+        return
+    end
+
+    local state = State.ensureState(player)
+    if not state then
+        return
+    end
+
+    local applied = Runtime.applyCanonicalFatigueTarget(player, state, target)
+    if recording then
+        pcall(DevPanel.sampleEvent, "set-fatigue", string.format("%.0f%%", target * 100))
+    end
+
+    if applied then
+        print(string.format(
+            "[CaffeineMakesSense] set fatigue: real %.1f%%, displayed %.1f%%",
+            (tonumber(applied.realFatigue) or 0) * 100,
+            (tonumber(applied.displayedFatigue) or 0) * 100
+        ))
+    end
+end
+
 local CMS_DevOverlay = (ISPanel and type(ISPanel.derive) == "function")
     and ISPanel:derive("CMS_DevOverlay")
     or nil
@@ -596,6 +725,12 @@ function CMS_DevOverlay:createChildren()
     self.resetBtn.backgroundColor = { r = 0.15, g = 0.15, b = 0.20, a = 0.9 }
     self.resetBtn.textColor = { r = 0.8, g = 0.8, b = 0.8, a = 1 }
     self:addChild(self.resetBtn)
+
+    self.fatigue60Btn = ISButton:new(PAD + 152, 4, 94, 22, "Fatigue 60", self, CMS_DevOverlay.onSetFatigue60)
+    self.fatigue60Btn:initialise()
+    self.fatigue60Btn.backgroundColor = { r = 0.15, g = 0.15, b = 0.20, a = 0.9 }
+    self.fatigue60Btn.textColor = { r = 0.8, g = 0.8, b = 0.8, a = 1 }
+    self:addChild(self.fatigue60Btn)
 end
 
 function CMS_DevOverlay:updateRecordButton()
@@ -625,6 +760,10 @@ end
 
 function CMS_DevOverlay:onReset()
     DevPanel.reset()
+end
+
+function CMS_DevOverlay:onSetFatigue60()
+    DevPanel.setFatigueTarget(0.60)
 end
 
 function CMS_DevOverlay:onClose()

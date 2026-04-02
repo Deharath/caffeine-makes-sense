@@ -1,0 +1,9 @@
+VERSION = 1,
+
+option CaffeineMakesSense.EnableSleepPenaltyModel
+{
+    type = boolean,
+    default = true,
+    page = CaffeineMakesSense,
+    translation = CaffeineMakesSense_EnableSleepPenaltyModel,
+}

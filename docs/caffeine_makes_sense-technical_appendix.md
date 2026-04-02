@@ -1,7 +1,7 @@
-# Caffeine Makes Sense — Technical Appendix (v1.0.3)
+# Caffeine Makes Sense — Technical Appendix (v1.0.4)
 
 _As of April 2, 2026_  
-`SCRIPT_VERSION=1.0.3`
+`SCRIPT_VERSION=1.0.4`
 
 ## Scope
 
@@ -91,10 +91,9 @@ Instead:
 - the weighted sleep disruption score also drives a continuous `sleepRecoveryPenaltyFraction`
 - CMS counteracts a fraction of vanilla fatigue recovery while the player is asleep
 - sleep planning now rebases from CMS `realFatigue` rather than masked visible fatigue
-- in multiplayer, CMS now leaves sleep fully vanilla. Sleep planner hooks and
-  sleep-recovery penalties are singleplayer-only because the dedicated-server
-  sleep/fast-forward seam is too brittle for custom scheduling without false
-  fast-forward persistence after wake.
+- CMS sleep penalties are gated by the sandbox option `CaffeineMakesSense.EnableSleepPenaltyModel`:
+  when that option is off, caffeine masking still works while awake, but CMS no longer degrades sleep recovery or adds planner penalty contribution
+- sleep planner hooks are installed only after a confirmed local player exists, which avoids the old early-MP boot seam
 - AMS can still extend planned sleep for poor armor sleep conditions, but CMS itself leaves extra planner hours to the real-fatigue baseline
 - if caffeine is still active after wake, visible fatigue may remain somewhat masked
 
@@ -133,24 +132,26 @@ Important state fields in [CaffeineMakesSense_Runtime.lua](../common/media/lua/s
 ## Module Inventory
 
 ### Entry / Client
-- `client/CaffeineMakesSense_Main.lua` — client boot facade, event registration, SP tick wiring, dev panel hotkey/context menu
+- `client/CaffeineMakesSense_Main.lua` — client boot facade, event registration, SP tick wiring, dev panel hotkey/context menu; sleep planner hooks are installed only after a confirmed local player exists
 - `client/CaffeineMakesSense_HealthPanelHook.lua` — compact health-panel status line that shows `Caffeine: <level>` when stimulant load is meaningfully present; in stacked mode it publishes the line for NMS to host instead of relying on wrapper order
-- `client/CaffeineMakesSense_SleepHooks.lua` — planner hooks for `ISSleepDialog` and auto-sleep in singleplayer only; MP now hard-defers to vanilla sleep
+- `client/CaffeineMakesSense_SleepHooks.lua` — planner hooks for `ISSleepDialog` and auto-sleep; the module is installed only after a confirmed local player exists, which avoids the old early-MP boot seam
 - `client/CaffeineMakesSense_Tick.lua` — thin client wrapper into shared runtime tick
 - `client/CaffeineMakesSense_State.lua` — thin client wrapper into shared state/runtime helpers
 - `client/CaffeineMakesSense_Hooks.lua` — consume hooks for `OnEat`, `ISDrinkFluidAction`, and `ISEatFoodAction`; also handles dev recording dose events and MP dose forwarding
 
 ### Dev-only Client
-- `client/dev/CaffeineMakesSense_DevPanel.lua` — debug overlay, recording UI, CSV export, reset helper; present in dev builds and stripped from release builds
+- `client/dev/CaffeineMakesSense_DevPanel.lua` — debug overlay, recording UI, CSV export, reset helper, and fixed-fatigue shortcut (`Fatigue 60`); present in dev builds and stripped from release builds
 
 ### Shared
 - `shared/CaffeineMakesSense_Config.lua` — tuning defaults for profiles, projection, and sleep disruption
+- `common/media/sandbox-options.txt` — world/server-facing toggle for the CMS sleep-penalty model
+- `shared/Translate/EN/Sandbox.json` — English labels for CMS sandbox options
 - `shared/CaffeineMakesSense_Compat.lua` — cross-mod compat registry bootstrap
 - `shared/CaffeineMakesSense_HealthStatus.lua` — shared helper that maps meaningful stimulant load to the player-facing `Caffeine: <level>` status line using simple four-step wording (`Low` through `Very High`)
 - `shared/CaffeineMakesSense_SleepPlanner.lua` — shared vanilla-equivalent sleep planning helpers used to rebase planner hours from real fatigue and keep CMS planner compensation separate from runtime sleep cost
 - `shared/CaffeineMakesSense_ItemDefs.lua` — caffeine item catalog, hot-drink mappings, pill mappings
 - `shared/CaffeineMakesSense_Pharma.lua` — onset/decay, mask strength, sleep disruption strength, fatigue projection
-- `shared/CaffeineMakesSense_Runtime.lua` — shared state model, dose storage, fatigue tick logic, and SP-only sleep session logic; MP now hard-defers to vanilla sleep
+- `shared/CaffeineMakesSense_Runtime.lua` — shared state model, dose storage, fatigue tick logic, SP-only sleep session logic, and the canonical MP fatigue-target apply path; it now explicitly requires the shared pharma helper before projecting masked fatigue
 - `shared/CaffeineMakesSense_MPCompat.lua` — MP constants and command names
 - `shared/CaffeineMakesSense_Boot.lua` — boot-time vanilla item patching
 
@@ -178,9 +179,9 @@ The dev panel can be opened without the Lua Dev Console:
 
 In multiplayer, the panel reads authoritative server snapshots rather than unsynced local state. The panel reset action also routes through the server so it clears real MP caffeine state instead of only wiping the client view.
 The player-facing health panel still allows a short fresh-local grace path for meaningful just-consumed load if the newest local dose is newer than the last server snapshot, so the caffeine line does not visibly lag the consume action while waiting for the authoritative echo.
-The sleep block separates `Projected Penalty` from `Active Penalty`: projected penalty is the sleep-efficiency loss implied by the current caffeine load if the player slept now, while active penalty is the penalty actually being applied during an ongoing sleep session.
+The sleep block separates `Projected Penalty` from `Active Penalty`: projected penalty is the sleep-efficiency loss implied by the current caffeine load if the player slept now, while active penalty is the penalty actually being applied during an ongoing sleep session. When the sandbox sleep toggle is off, both values are reported as zero.
 Sleep planning in MP now rebases from authoritative snapshot `displayedFatigue` / `realFatigue` when that snapshot exists, instead of trusting dormant client-local CMS state.
-MP recording now forces a start/stop snapshot pass and still samples once per minute while connected to a server, so short authoritative sessions no longer save empty CSVs just because the local runtime tick is dormant. Rows also carry `sample_source`, `snapshot_updated_min`, and `snapshot_age_min` so stale authoritative snapshots and pending-snapshot placeholders are explicit instead of being silently timestamped as fresh local state.
+MP recording now forces a start/stop snapshot pass and still samples once per minute while connected to a server, so short authoritative sessions no longer save empty CSVs just because the local runtime tick is dormant. Rows also carry `sample_source`, `snapshot_updated_min`, and `snapshot_age_min` so stale authoritative snapshots and pending-snapshot placeholders are explicit instead of being silently timestamped as fresh local state. They also record both the local client wake view (`local_sleeping`, `client_fast_forward`, `ui_speed`) and the authoritative snapshot view (`server_sleeping`) so MP sleep bugs can be separated into sleep-state drift versus clock-sync drift.
 
 Recording CSV currently includes:
 - elapsed/game time

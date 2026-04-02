@@ -1,0 +1,5 @@
+{
+    "Sandbox_CaffeineMakesSense": "Caffeine Makes Sense",
+    "Sandbox_CaffeineMakesSense_EnableSleepPenaltyModel": "Caffeine Reduces Sleep Recovery",
+    "Sandbox_CaffeineMakesSense_EnableSleepPenaltyModel_tooltip": "When enabled, caffeine degrades sleep through slower overnight fatigue recovery and planner-aware longer sleep. Turn this off to keep CMS awake masking while leaving sleep penalty-free."
+}

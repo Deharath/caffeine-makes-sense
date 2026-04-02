@@ -21,6 +21,11 @@ CaffeineMakesSense.DEFAULTS = {
     -- Minimum caffeine level (fraction of peak) below which the effect is negligible.
     NegligibleThreshold = 0.05,
 
+    -- When enabled, caffeine can degrade sleep quality through slower overnight
+    -- fatigue recovery and planner-aware longer sleep. Turn this off to keep
+    -- CMS awake masking while leaving sleep fully penalty-free.
+    EnableSleepPenaltyModel = true,
+
     -- Caffeine dose per item category.
     -- Scaled to real mg: coffee=95mg=1.0, pill=200mg=2.0, tea=47mg=0.5.
     DoseCoffee = 1.0,

@@ -27,11 +27,6 @@ local function safeCall(target, methodName, ...)
     return result
 end
 
-local function isMultiplayerSession()
-    return (type(isClient) == "function" and isClient() == true)
-        or (type(isServer) == "function" and isServer() == true)
-end
-
 local function getCompat()
     local compat = CaffeineMakesSense.Compat or rawget(_G, "MakesSenseCompat")
     if type(compat) ~= "table" then
@@ -234,12 +229,12 @@ local function wrapAutoSleep()
         return
     end
 
+    local originalOnSleepWalkToComplete = ISWorldObjectContextMenu.onSleepWalkToComplete
     ISWorldObjectContextMenu.onSleepWalkToComplete = function(playerIndex, bed)
         local playerObj = getPlayerFromIndex(playerIndex)
         if not playerObj then
-            return
+            return originalOnSleepWalkToComplete(playerIndex, bed)
         end
-
         local stats = type(playerObj.getStats) == "function" and playerObj:getStats() or nil
         local moodles = type(playerObj.getMoodles) == "function" and playerObj:getMoodles() or nil
         local isZombies = stats and (
@@ -339,9 +334,6 @@ local function wrapAutoSleep()
 end
 
 function SleepHooks.wrapSleepPlanning()
-    if isMultiplayerSession() then
-        return
-    end
     wrapSleepDialog()
     wrapAutoSleep()
     if CaffeineMakesSense._sleepPlannerHooksLogged ~= true then

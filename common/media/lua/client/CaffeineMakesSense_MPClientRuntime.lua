@@ -45,6 +45,17 @@ local function getWorldAgeMinutes()
     return (tonumber(hours) or 0) * 60
 end
 
+local function getLocalPlayer()
+    if type(getPlayer) ~= "function" then
+        return nil
+    end
+    local ok, playerObj = pcall(getPlayer)
+    if not ok then
+        return nil
+    end
+    return playerObj
+end
+
 function MPClient.getSnapshot()
     return latestSnapshot
 end
@@ -86,6 +97,38 @@ function MPClient.requestReset(reason)
         world_minute = math.floor(getWorldAgeMinutes()),
     }
     return pcall(sendClientCommand, tostring(MP.NET_MODULE), tostring(MP.RESET_COMMAND), args)
+end
+
+function MPClient.requestSetFatigue(targetFraction, reason)
+    if type(isClient) ~= "function" or not isClient() then
+        return false
+    end
+    if type(sendClientCommand) ~= "function" then
+        return false
+    end
+    local args = {
+        target_fatigue = tonumber(targetFraction) or 0,
+        reason = tostring(reason or "dev_panel"),
+        world_minute = math.floor(getWorldAgeMinutes()),
+    }
+    return pcall(sendClientCommand, tostring(MP.NET_MODULE), tostring(MP.SET_FATIGUE_COMMAND), args)
+end
+
+local function onConnected()
+    latestSnapshot = nil
+    MPClient.requestSnapshot("connected", true)
+end
+
+local function onCreatePlayer(_playerIndex, playerObj)
+    local player = playerObj or getLocalPlayer()
+    if not player then
+        return
+    end
+    if type(player.isLocalPlayer) == "function" and not player:isLocalPlayer() then
+        return
+    end
+    latestSnapshot = nil
+    MPClient.requestSnapshot("create_player", true)
 end
 
 local function onServerCommand(module, command, args)
@@ -131,6 +174,12 @@ end
 
 if Events and Events.OnServerCommand and type(Events.OnServerCommand.Add) == "function" then
     Events.OnServerCommand.Add(onServerCommand)
+end
+if Events and Events.OnConnected and type(Events.OnConnected.Add) == "function" then
+    Events.OnConnected.Add(onConnected)
+end
+if Events and Events.OnCreatePlayer and type(Events.OnCreatePlayer.Add) == "function" then
+    Events.OnCreatePlayer.Add(onCreatePlayer)
 end
 
 return MPClient

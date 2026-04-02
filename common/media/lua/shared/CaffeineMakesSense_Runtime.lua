@@ -3,6 +3,7 @@ CaffeineMakesSense.Runtime = CaffeineMakesSense.Runtime or {}
 
 require "CaffeineMakesSense_SleepPlanner"
 require "CaffeineMakesSense_HealthStatus"
+require "CaffeineMakesSense_Pharma"
 
 local Runtime = CaffeineMakesSense.Runtime
 local DEFAULTS = CaffeineMakesSense.DEFAULTS or {}
@@ -45,16 +46,13 @@ local function getCompat()
     return compat
 end
 
-local function isMultiplayerSession()
-    return (type(isClient) == "function" and isClient() == true)
-        or (type(isServer) == "function" and isServer() == true)
-end
-
 local function buildTraceSnapshot(playerObj, _args)
     local state = Runtime.ensureStateForPlayer(playerObj)
     if not state then
         return {}
     end
+    local options = Runtime.getOptions()
+    local sleepPenaltyEnabled = Runtime.isSleepPenaltyEnabled(options)
 
     return {
         real_fatigue = tonumber(state.realFatigue) or nil,
@@ -62,12 +60,12 @@ local function buildTraceSnapshot(playerObj, _args)
         last_set_fatigue = tonumber(state.lastSetFatigue) or nil,
         last_nms_extra_fatigue = tonumber(state.lastCompatNmsExtraFatigue) or 0,
         last_ams_sleep_fatigue = tonumber(state.lastCompatAmsSleepFatigue) or 0,
-        last_sleep_recovery_fatigue = tonumber(state.lastSleepRecoveryFatigue) or 0,
+        last_sleep_recovery_fatigue = sleepPenaltyEnabled and (tonumber(state.lastSleepRecoveryFatigue) or 0) or 0,
         peak_stim = tonumber(state.peakStimThisCycle) or 0,
-        sleep_disruption_score = tonumber(state.sleepDisruptionScore) or 0,
-        sleep_recovery_penalty_fraction = tonumber(state.lastSleepRecoveryPenaltyFraction)
+        sleep_disruption_score = sleepPenaltyEnabled and (tonumber(state.sleepDisruptionScore) or 0) or 0,
+        sleep_recovery_penalty_fraction = sleepPenaltyEnabled and (tonumber(state.lastSleepRecoveryPenaltyFraction)
             or tonumber(state.sleepRecoveryPenaltyFraction)
-            or 0,
+            or 0) or 0,
         caffeine_stress = tonumber(state.caffeineStressCurrent) or 0,
     }
 end
@@ -143,6 +141,13 @@ function Runtime.getOptions()
         end
     end
     return options
+end
+
+function Runtime.isSleepPenaltyEnabled(options)
+    if type(options) ~= "table" then
+        options = Runtime.getOptions()
+    end
+    return options.EnableSleepPenaltyModel ~= false
 end
 
 function Runtime.ensureStateTable(state, nowMinutes)
@@ -363,6 +368,58 @@ function Runtime.resetState(state, restoredFatigue)
     state.lastSetFatigue = restored
 end
 
+function Runtime.applyCanonicalFatigueTarget(playerObj, state, targetFatigue)
+    if not playerObj then
+        return nil
+    end
+
+    local Pharma = CaffeineMakesSense.Pharma
+    local runtimeState = state or Runtime.ensureStateForPlayer(playerObj, Runtime.getWorldAgeMinutes())
+    if not runtimeState or type(Pharma) ~= "table" then
+        return nil
+    end
+
+    local target = clamp(tonumber(targetFatigue) or 0, 0, 1)
+    local nowMinutes = Runtime.getWorldAgeMinutes()
+    local options = Runtime.getOptions()
+    local sleeping = Runtime.isPlayerAsleep(playerObj)
+    local rawStimLoad, maskLoad = Runtime.getLoadTotals(runtimeState, nowMinutes, options)
+    local maxCaffeine = tonumber(options.MaxCaffeineLevel) or 4.0
+    local peakMask = tonumber(options.PeakMaskStrength) or 0.85
+    local suppressionFrac = tonumber(options.SuppressionFraction) or 0.50
+    local projectionShapeScale = tonumber(options.ProjectionShapeScale) or 3.0
+
+    local targetDisplayed = target
+    runtimeState.realFatigue = target
+    runtimeState.pendingCatchupMinutes = 0
+
+    if sleeping then
+        runtimeState.hiddenFatigue = 0
+    else
+        if type(Pharma.maskStrength) == "function" and type(Pharma.projectDisplayedFatigue) == "function" then
+            local maskStr = Pharma.maskStrength(maskLoad, peakMask, maxCaffeine)
+            targetDisplayed = Pharma.projectDisplayedFatigue(
+                target,
+                maskStr,
+                suppressionFrac,
+                projectionShapeScale
+            )
+            runtimeState.hiddenFatigue = math.max(0, target - targetDisplayed)
+        else
+            runtimeState.hiddenFatigue = 0
+        end
+    end
+
+    Runtime.setFatigue(playerObj, targetDisplayed)
+    runtimeState.lastSetFatigue = targetDisplayed
+
+    return {
+        realFatigue = target,
+        displayedFatigue = targetDisplayed,
+        sleeping = sleeping,
+    }
+end
+
 local function clearSleepSession(state)
     state.sleepStartMinute = nil
     state.sleepLastAccumMinute = nil
@@ -422,6 +479,9 @@ function Runtime.beginSleepSession(playerObj, state, nowMinutes)
 end
 
 function Runtime.computeSleepDisruptionStrength(rawStimLoad, options)
+    if not Runtime.isSleepPenaltyEnabled(options) then
+        return 0
+    end
     local Pharma = CaffeineMakesSense.Pharma
     if not Pharma then
         return 0
@@ -432,7 +492,7 @@ function Runtime.computeSleepDisruptionStrength(rawStimLoad, options)
 end
 
 function Runtime.computeSleepRecoveryPenaltyFraction(rawStimLoad, options)
-    if isMultiplayerSession() then
+    if not Runtime.isSleepPenaltyEnabled(options) then
         return 0
     end
     local Pharma = CaffeineMakesSense.Pharma
@@ -451,6 +511,14 @@ function Runtime.computeSleepRecoveryPenaltyFraction(rawStimLoad, options)
 end
 
 function Runtime.buildSleepDebugMetrics(state, rawStimLoad, options)
+    if not Runtime.isSleepPenaltyEnabled(options) then
+        return {
+            disruptionScore = 0,
+            projectedPenaltyFraction = 0,
+            activePenaltyFraction = 0,
+            lastRecoveryFatigue = 0,
+        }
+    end
     local resolvedState = type(state) == "table" and state or {}
     return {
         disruptionScore = math.max(
@@ -464,9 +532,6 @@ function Runtime.buildSleepDebugMetrics(state, rawStimLoad, options)
 end
 
 function Runtime.computeSleepPlannerPenalty(playerObj, _args)
-    if isMultiplayerSession() then
-        return { penaltyFraction = 0, recoveryPenaltyFraction = 0, rawStimLoad = 0 }
-    end
     if not playerObj then
         return { penaltyFraction = 0 }
     end
@@ -478,6 +543,13 @@ function Runtime.computeSleepPlannerPenalty(playerObj, _args)
     end
 
     local options = Runtime.getOptions()
+    if not Runtime.isSleepPenaltyEnabled(options) then
+        return {
+            penaltyFraction = 0,
+            recoveryPenaltyFraction = 0,
+            rawStimLoad = Runtime.getLoadTotals(state, nowMinutes, options),
+        }
+    end
     local rawStimLoad = Runtime.getLoadTotals(state, nowMinutes, options)
     local recoveryPenalty = Runtime.computeSleepRecoveryPenaltyFraction(rawStimLoad, options)
     local plannerPenalty = recoveryPenalty
@@ -493,16 +565,6 @@ function Runtime.computeSleepPlannerPenalty(playerObj, _args)
 end
 
 function Runtime.accumulateSleepDisruption(playerObj, state, nowMinutes, dtMinutes, options)
-    if isMultiplayerSession() then
-        state.sleepWeightedDisruption = 0
-        state.sleepWeightedMinutes = 0
-        state.sleepPeakDisruption = 0
-        state.sleepDisruptionStrength = 0
-        state.sleepDisruptionScore = 0
-        state.sleepRecoveryPenaltyFraction = 0
-        state.sleepLastAccumMinute = tonumber(nowMinutes) or Runtime.getWorldAgeMinutes()
-        return
-    end
     local Pharma = CaffeineMakesSense.Pharma
     if not state or not Pharma then
         return
@@ -510,6 +572,17 @@ function Runtime.accumulateSleepDisruption(playerObj, state, nowMinutes, dtMinut
     local dt = math.max(0, tonumber(dtMinutes) or 0)
     local now = tonumber(nowMinutes) or Runtime.getWorldAgeMinutes()
     if dt <= 0 then
+        state.sleepLastAccumMinute = now
+        return
+    end
+
+    if not Runtime.isSleepPenaltyEnabled(options) then
+        state.sleepWeightedDisruption = 0
+        state.sleepWeightedMinutes = 0
+        state.sleepPeakDisruption = 0
+        state.sleepDisruptionStrength = 0
+        state.sleepDisruptionScore = 0
+        state.sleepRecoveryPenaltyFraction = 0
         state.sleepLastAccumMinute = now
         return
     end
