@@ -45,6 +45,11 @@ local function getCompat()
     return compat
 end
 
+local function isMultiplayerSession()
+    return (type(isClient) == "function" and isClient() == true)
+        or (type(isServer) == "function" and isServer() == true)
+end
+
 local function buildTraceSnapshot(playerObj, _args)
     local state = Runtime.ensureStateForPlayer(playerObj)
     if not state then
@@ -427,6 +432,9 @@ function Runtime.computeSleepDisruptionStrength(rawStimLoad, options)
 end
 
 function Runtime.computeSleepRecoveryPenaltyFraction(rawStimLoad, options)
+    if isMultiplayerSession() then
+        return 0
+    end
     local Pharma = CaffeineMakesSense.Pharma
     if not Pharma then
         return 0
@@ -456,6 +464,9 @@ function Runtime.buildSleepDebugMetrics(state, rawStimLoad, options)
 end
 
 function Runtime.computeSleepPlannerPenalty(playerObj, _args)
+    if isMultiplayerSession() then
+        return { penaltyFraction = 0, recoveryPenaltyFraction = 0, rawStimLoad = 0 }
+    end
     if not playerObj then
         return { penaltyFraction = 0 }
     end
@@ -482,6 +493,16 @@ function Runtime.computeSleepPlannerPenalty(playerObj, _args)
 end
 
 function Runtime.accumulateSleepDisruption(playerObj, state, nowMinutes, dtMinutes, options)
+    if isMultiplayerSession() then
+        state.sleepWeightedDisruption = 0
+        state.sleepWeightedMinutes = 0
+        state.sleepPeakDisruption = 0
+        state.sleepDisruptionStrength = 0
+        state.sleepDisruptionScore = 0
+        state.sleepRecoveryPenaltyFraction = 0
+        state.sleepLastAccumMinute = tonumber(nowMinutes) or Runtime.getWorldAgeMinutes()
+        return
+    end
     local Pharma = CaffeineMakesSense.Pharma
     if not state or not Pharma then
         return

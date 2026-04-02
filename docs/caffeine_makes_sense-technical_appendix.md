@@ -91,6 +91,10 @@ Instead:
 - the weighted sleep disruption score also drives a continuous `sleepRecoveryPenaltyFraction`
 - CMS counteracts a fraction of vanilla fatigue recovery while the player is asleep
 - sleep planning now rebases from CMS `realFatigue` rather than masked visible fatigue
+- in multiplayer, CMS now leaves sleep fully vanilla. Sleep planner hooks and
+  sleep-recovery penalties are singleplayer-only because the dedicated-server
+  sleep/fast-forward seam is too brittle for custom scheduling without false
+  fast-forward persistence after wake.
 - AMS can still extend planned sleep for poor armor sleep conditions, but CMS itself leaves extra planner hours to the real-fatigue baseline
 - if caffeine is still active after wake, visible fatigue may remain somewhat masked
 
@@ -131,7 +135,7 @@ Important state fields in [CaffeineMakesSense_Runtime.lua](../common/media/lua/s
 ### Entry / Client
 - `client/CaffeineMakesSense_Main.lua` — client boot facade, event registration, SP tick wiring, dev panel hotkey/context menu
 - `client/CaffeineMakesSense_HealthPanelHook.lua` — compact health-panel status line that shows `Caffeine: <level>` when stimulant load is meaningfully present; in stacked mode it publishes the line for NMS to host instead of relying on wrapper order
-- `client/CaffeineMakesSense_SleepHooks.lua` — planner hooks for `ISSleepDialog` and auto-sleep; rebases planning from `realFatigue` and lets AMS own any extra-hours extension
+- `client/CaffeineMakesSense_SleepHooks.lua` — planner hooks for `ISSleepDialog` and auto-sleep in singleplayer only; MP now hard-defers to vanilla sleep
 - `client/CaffeineMakesSense_Tick.lua` — thin client wrapper into shared runtime tick
 - `client/CaffeineMakesSense_State.lua` — thin client wrapper into shared state/runtime helpers
 - `client/CaffeineMakesSense_Hooks.lua` — consume hooks for `OnEat`, `ISDrinkFluidAction`, and `ISEatFoodAction`; also handles dev recording dose events and MP dose forwarding
@@ -146,7 +150,7 @@ Important state fields in [CaffeineMakesSense_Runtime.lua](../common/media/lua/s
 - `shared/CaffeineMakesSense_SleepPlanner.lua` — shared vanilla-equivalent sleep planning helpers used to rebase planner hours from real fatigue and keep CMS planner compensation separate from runtime sleep cost
 - `shared/CaffeineMakesSense_ItemDefs.lua` — caffeine item catalog, hot-drink mappings, pill mappings
 - `shared/CaffeineMakesSense_Pharma.lua` — onset/decay, mask strength, sleep disruption strength, fatigue projection
-- `shared/CaffeineMakesSense_Runtime.lua` — shared state model, dose storage, fatigue tick logic, sleep session logic
+- `shared/CaffeineMakesSense_Runtime.lua` — shared state model, dose storage, fatigue tick logic, and SP-only sleep session logic; MP now hard-defers to vanilla sleep
 - `shared/CaffeineMakesSense_MPCompat.lua` — MP constants and command names
 - `shared/CaffeineMakesSense_Boot.lua` — boot-time vanilla item patching
 
