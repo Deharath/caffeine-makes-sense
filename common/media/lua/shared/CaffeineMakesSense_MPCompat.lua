@@ -9,7 +9,8 @@ MP.RESET_COMMAND = "reset"
 MP.SET_FATIGUE_COMMAND = "set_fatigue"
 MP.SNAPSHOT_COMMAND = "snapshot"
 MP.REQUEST_SNAPSHOT_COMMAND = "request_snapshot"
+MP.SLEEP_SESSION_COMMAND = "sleep_session"
 MP.MOD_STATE_KEY = "CaffeineMakesSenseState"
-MP.SCRIPT_VERSION = "1.0.4"
+MP.SCRIPT_VERSION = "1.0.5"
 
 return MP

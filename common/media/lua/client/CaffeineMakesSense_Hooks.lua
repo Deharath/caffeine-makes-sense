@@ -67,6 +67,11 @@ local function getDrinkDef(item)
         return byFullType
     end
 
+    local fluidDefs = ItemDefs.CAFFEINE_FLUIDS
+    if type(fluidDefs) ~= "table" then
+        return nil
+    end
+
     local fluidContainer = type(item.getFluidContainer) == "function" and item:getFluidContainer() or nil
     local primaryFluid = fluidContainer and type(fluidContainer.getPrimaryFluid) == "function" and fluidContainer:getPrimaryFluid() or nil
     if not primaryFluid then
@@ -87,7 +92,7 @@ local function getDrinkDef(item)
         end
     end
 
-    return fluidName and ItemDefs.CAFFEINE_FLUIDS[fluidName] or nil
+    return fluidName and fluidDefs[fluidName] or nil
 end
 
 local function getCaffeineItemDef(item)
@@ -120,7 +125,6 @@ end
 
 function Hooks.onCaffeineConsumed(player, doseKey, category, profileKey, percentage)
     local Runtime = CaffeineMakesSense.Runtime
-    local State = CaffeineMakesSense.State
     local state = nil
     local options = nil
 
@@ -132,11 +136,11 @@ function Hooks.onCaffeineConsumed(player, doseKey, category, profileKey, percent
         state = Runtime.ensureStateForPlayer(player, nowMinutes)
         options = Runtime.getOptions()
     else
-        if not State then
+        if not Runtime then
             return
         end
-        state = State.ensureState(player)
-        options = State.getOptions()
+        state = Runtime.ensureStateForPlayer(player)
+        options = Runtime.getOptions()
     end
 
     if not state or not options then
@@ -159,8 +163,6 @@ function Hooks.onCaffeineConsumed(player, doseKey, category, profileKey, percent
 
     if Runtime and type(Runtime.addDose) == "function" then
         Runtime.addDose(state, doseLevel, nowMinutes, profileKey, category)
-    elseif State and type(State.addDose) == "function" then
-        State.addDose(state, doseLevel, nowMinutes, profileKey, category)
     else
         return
     end
@@ -215,6 +217,8 @@ function CMS_OnEatCaffeine(food, character, percentage)
 end
 
 function Hooks.wrapDrinkFluidAction()
+    -- Legacy compatibility seam: B42+ caffeine dosing is OnEat-first; this
+    -- wrapper exists for fluid-container consume paths that bypass OnEat.
     if CaffeineMakesSense._drinkFluidWrapped then
         return
     end

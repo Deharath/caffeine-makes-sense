@@ -6,14 +6,11 @@ pcall(require, "CaffeineMakesSense_Compat")
 pcall(require, "CaffeineMakesSense_ItemDefs")
 require "CaffeineMakesSense_Pharma"
 require "CaffeineMakesSense_Boot"
-require "CaffeineMakesSense_State"
-require "CaffeineMakesSense_Tick"
+require "CaffeineMakesSense_Runtime"
 require "CaffeineMakesSense_Hooks"
 require "CaffeineMakesSense_HealthPanelHook"
 pcall(require, "CaffeineMakesSense_MPClientRuntime")
 
-local State = CaffeineMakesSense.State
-local Tick = CaffeineMakesSense.Tick
 local Hooks = CaffeineMakesSense.Hooks
 local HealthPanelHook = CaffeineMakesSense.HealthPanelHook
 local MP = CaffeineMakesSense.MP or {}
@@ -171,7 +168,7 @@ local function onEveryOneMinute()
             DevPanel.capturePreTick()
         end
 
-        Tick.tickPlayer(player)
+        Runtime.tickPlayer(player)
 
         if isRec then
             DevPanel.sampleTick()
@@ -189,7 +186,7 @@ local function onCreatePlayer(playerIndex, playerObj)
         if not player then
             return
         end
-        local state = State.ensureState(player)
+        local state = Runtime.ensureStateForPlayer(player)
         if not bootLogged and state then
             bootLogged = true
             log(string.format("[RUNTIME] version=%s doses=%d mp=%s",

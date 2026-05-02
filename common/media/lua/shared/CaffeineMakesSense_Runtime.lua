@@ -46,6 +46,11 @@ local function getCompat()
     return compat
 end
 
+local function isAuthoritativeMpServer()
+    return ((type(isServer) == "function" and isServer() == true)
+        or (GameServer and GameServer.bServer == true))
+end
+
 local function buildTraceSnapshot(playerObj, _args)
     local state = Runtime.ensureStateForPlayer(playerObj)
     if not state then
@@ -66,6 +71,8 @@ local function buildTraceSnapshot(playerObj, _args)
         sleep_recovery_penalty_fraction = sleepPenaltyEnabled and (tonumber(state.lastSleepRecoveryPenaltyFraction)
             or tonumber(state.sleepRecoveryPenaltyFraction)
             or 0) or 0,
+        sleep_wake_adjustment = tonumber(state.lastSleepWakeAdjustment) or 0,
+        sleep_bed_type = tostring(state.sleepBedType or ""),
         caffeine_stress = tonumber(state.caffeineStressCurrent) or 0,
     }
 end
@@ -99,6 +106,7 @@ do
             capabilities = {
                 fatigue_coordinator = true,
                 sleep_planner_coordinator = true,
+                sleep_wake_adjustment_coordinator = true,
                 sleep_planner_penalty_provider = true,
             },
             callbacks = {
@@ -159,10 +167,12 @@ function Runtime.ensureStateTable(state, nowMinutes)
     state.peakStimThisCycle = tonumber(state.peakStimThisCycle) or 0
     state.lastUpdateGameMinutes = tonumber(state.lastUpdateGameMinutes) or stateNow
     state.pendingCatchupMinutes = math.max(0, tonumber(state.pendingCatchupMinutes) or 0)
+    state.pendingSleepSession = type(state.pendingSleepSession) == "table" and state.pendingSleepSession or nil
     state.realFatigue = tonumber(state.realFatigue) or nil
     state.lastSetFatigue = tonumber(state.lastSetFatigue) or nil
     state.wasSleeping = (state.wasSleeping == true)
     state.sleepStartMinute = tonumber(state.sleepStartMinute) or nil
+    state.sleepBedType = tostring(state.sleepBedType or "")
     state.sleepLastAccumMinute = tonumber(state.sleepLastAccumMinute) or nil
     state.sleepWeightedDisruption = tonumber(state.sleepWeightedDisruption) or 0
     state.sleepWeightedMinutes = tonumber(state.sleepWeightedMinutes) or 0
@@ -173,6 +183,7 @@ function Runtime.ensureStateTable(state, nowMinutes)
     state.lastSleepRecoveryPenaltyFraction = clamp(tonumber(state.lastSleepRecoveryPenaltyFraction) or 0, 0, 0.95)
     state.lastSleepRecoveryFatigue = tonumber(state.lastSleepRecoveryFatigue) or 0
     state.lastSleepDisruptionScore = tonumber(state.lastSleepDisruptionScore) or 0
+    state.lastSleepWakeAdjustment = tonumber(state.lastSleepWakeAdjustment) or 0
     state.caffeineStressCurrent = clamp(tonumber(state.caffeineStressCurrent) or 0, 0, 1)
     state.caffeineStressTarget = clamp(tonumber(state.caffeineStressTarget) or 0, 0, 1)
     state.lastAppliedCaffeineStress = clamp(tonumber(state.lastAppliedCaffeineStress) or 0, 0, 1)
@@ -349,8 +360,10 @@ function Runtime.resetState(state, restoredFatigue)
     state.hiddenFatigue = 0
     state.peakStimThisCycle = 0
     state.pendingCatchupMinutes = 0
+    state.pendingSleepSession = nil
     state.wasSleeping = false
     state.sleepStartMinute = nil
+    state.sleepBedType = ""
     state.sleepLastAccumMinute = nil
     state.sleepWeightedDisruption = 0
     state.sleepWeightedMinutes = 0
@@ -361,6 +374,7 @@ function Runtime.resetState(state, restoredFatigue)
     state.lastSleepRecoveryPenaltyFraction = 0
     state.lastSleepRecoveryFatigue = 0
     state.lastSleepDisruptionScore = 0
+    state.lastSleepWakeAdjustment = 0
     state.caffeineStressCurrent = 0
     state.caffeineStressTarget = 0
     state.lastAppliedCaffeineStress = 0
@@ -422,6 +436,7 @@ end
 
 local function clearSleepSession(state)
     state.sleepStartMinute = nil
+    state.sleepBedType = ""
     state.sleepLastAccumMinute = nil
     state.sleepWeightedDisruption = 0
     state.sleepWeightedMinutes = 0
@@ -429,6 +444,14 @@ local function clearSleepSession(state)
     state.sleepDisruptionScore = 0
     state.sleepDisruptionStrength = 0
     state.sleepRecoveryPenaltyFraction = 0
+end
+
+local function resolveSleepBedType(playerObj, state)
+    local bedType = tostring(safeCall(playerObj, "getBedType") or "")
+    if bedType == "" and type(state) == "table" and type(state.pendingSleepSession) == "table" then
+        bedType = tostring(state.pendingSleepSession.bedType or state.pendingSleepSession.bed_type or "")
+    end
+    return bedType
 end
 
 local function updateCaffeineStress(playerObj, state, rawStimLoad, dtMinutes, sleeping, options)
@@ -474,8 +497,75 @@ function Runtime.beginSleepSession(playerObj, state, nowMinutes)
     clearSleepSession(state)
     state.wasSleeping = true
     state.sleepStartMinute = now
+    state.sleepBedType = resolveSleepBedType(playerObj, state)
+    state.pendingSleepSession = nil
     state.sleepLastAccumMinute = now
     state.lastSleepRecoveryFatigue = 0
+    state.lastSleepWakeAdjustment = 0
+end
+
+function Runtime.applySleepWakeFatigueAdjustment(playerObj, state, nowMinutes)
+    if not playerObj or type(state) ~= "table" then
+        return 0
+    end
+
+    local compat = getCompat()
+    if type(compat) ~= "table" or type(compat.computeSleepWakeFatigueDelta) ~= "function" then
+        state.lastSleepWakeAdjustment = 0
+        return 0
+    end
+
+    local sleepStartMinute = tonumber(state.sleepStartMinute)
+    if sleepStartMinute == nil then
+        state.lastSleepWakeAdjustment = 0
+        return 0
+    end
+
+    local sleptHours = math.max(0, ((tonumber(nowMinutes) or Runtime.getWorldAgeMinutes()) - sleepStartMinute) / 60.0)
+    local referenceFatigue = tonumber(state.realFatigue)
+    if referenceFatigue == nil then
+        referenceFatigue = Runtime.getFatigue(playerObj)
+    end
+    local expectedWakeAdjustment = tonumber(compat.computeSleepWakeFatigueDelta(state.sleepBedType, sleptHours)) or 0
+
+    local observedFatigue = Runtime.getFatigue(playerObj)
+    if observedFatigue ~= nil and referenceFatigue ~= nil then
+        local observedAdjustment = clamp(observedFatigue, 0, 1) - referenceFatigue
+        if math.abs(observedAdjustment) > 0.002 then
+            local trustObserved = true
+            if isAuthoritativeMpServer() and expectedWakeAdjustment ~= 0 then
+                trustObserved = (observedAdjustment < 0 and expectedWakeAdjustment < 0)
+                    or (observedAdjustment > 0 and expectedWakeAdjustment > 0)
+            end
+            if trustObserved then
+                state.lastSleepWakeAdjustment = observedAdjustment
+                state.realFatigue = clamp(observedFatigue, 0, 1)
+                return observedAdjustment
+            end
+        end
+    end
+
+    if not isAuthoritativeMpServer() then
+        state.lastSleepWakeAdjustment = 0
+        if observedFatigue ~= nil then
+            state.realFatigue = clamp(observedFatigue, 0, 1)
+        end
+        return 0
+    end
+
+    local wakeAdjustment = expectedWakeAdjustment
+    state.lastSleepWakeAdjustment = wakeAdjustment
+
+    if wakeAdjustment == 0 then
+        return 0
+    end
+
+    if referenceFatigue == nil then
+        return wakeAdjustment
+    end
+
+    state.realFatigue = clamp(referenceFatigue + wakeAdjustment, 0, 1)
+    return wakeAdjustment
 end
 
 function Runtime.computeSleepDisruptionStrength(rawStimLoad, options)
@@ -808,6 +898,7 @@ function Runtime.tickPlayer(playerObj)
     end
 
     if (not sleeping) and wasSleeping then
+        Runtime.applySleepWakeFatigueAdjustment(playerObj, state, nowMinutes)
         Runtime.finalizeSleepSession(playerObj, state, nowMinutes, options)
         local rawStimLoad, maskLoad = Runtime.getLoadTotals(state, nowMinutes, options)
         local targetDisplayed = state.realFatigue or displayedFatigue

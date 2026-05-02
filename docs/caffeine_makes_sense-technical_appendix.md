@@ -1,7 +1,7 @@
-# Caffeine Makes Sense — Technical Appendix (v1.0.4)
+# Caffeine Makes Sense — Technical Appendix (v1.0.5)
 
 _As of April 2, 2026_  
-`SCRIPT_VERSION=1.0.4`
+`SCRIPT_VERSION=1.0.5`
 
 ## Scope
 
@@ -94,6 +94,8 @@ Instead:
 - CMS sleep penalties are gated by the sandbox option `CaffeineMakesSense.EnableSleepPenaltyModel`:
   when that option is off, caffeine masking still works while awake, but CMS no longer degrades sleep recovery or adds planner penalty contribution
 - sleep planner hooks are installed only after a confirmed local player exists, which avoids the old early-MP boot seam
+- on wake, CMS prefers the actually observed wake fatigue result when vanilla has already changed it; on the authoritative MP server, observed deltas that point opposite the expected bed-quality direction are treated as stale wake handoff noise, so a no-bonus stat sync can no longer cancel the synthesized bed-based wake delta
+- in MP, the authoritative server now also processes the asleep to awake edge as soon as it sees the transition and sends native `syncPlayerStats` for FATIGUE on that wake edge; while the player stays asleep it also sends periodic native fatigue sync so client-visible fatigue is not waking from a stale sleep value
 - AMS can still extend planned sleep for poor armor sleep conditions, but CMS itself leaves extra planner hours to the real-fatigue baseline
 - if caffeine is still active after wake, visible fatigue may remain somewhat masked
 
@@ -135,8 +137,6 @@ Important state fields in [CaffeineMakesSense_Runtime.lua](../common/media/lua/s
 - `client/CaffeineMakesSense_Main.lua` — client boot facade, event registration, SP tick wiring, dev panel hotkey/context menu; sleep planner hooks are installed only after a confirmed local player exists
 - `client/CaffeineMakesSense_HealthPanelHook.lua` — compact health-panel status line that shows `Caffeine: <level>` when stimulant load is meaningfully present; in stacked mode it publishes the line for NMS to host instead of relying on wrapper order
 - `client/CaffeineMakesSense_SleepHooks.lua` — planner hooks for `ISSleepDialog` and auto-sleep; the module is installed only after a confirmed local player exists, which avoids the old early-MP boot seam
-- `client/CaffeineMakesSense_Tick.lua` — thin client wrapper into shared runtime tick
-- `client/CaffeineMakesSense_State.lua` — thin client wrapper into shared state/runtime helpers
 - `client/CaffeineMakesSense_Hooks.lua` — consume hooks for `OnEat`, `ISDrinkFluidAction`, and `ISEatFoodAction`; also handles dev recording dose events and MP dose forwarding
 
 ### Dev-only Client
@@ -167,7 +167,7 @@ Important state fields in [CaffeineMakesSense_Runtime.lua](../common/media/lua/s
 - direct consumables: `Base.Coffee2`, `Base.Teabag2`, `Base.ChocolateCoveredCoffeeBeans`
 
 The active gameplay path is `OnEat = CMS_OnEatCaffeine`, registered at boot on supported items.
-Fluid and hot-drink consume paths that bypass plain `OnEat` are also wrapped so vanilla flat coffee/tea fatigue changes are neutralized before CMS applies its own model.
+Build 42.14+ gameplay uses the `OnEat` path as the canonical caffeine intake path for hot-drink food items and pills. True beverage fluid containers still go through vanilla `DrinkFluid(...)`, so CMS keeps an explicit `Coffee` / `Tea` fluid map and the fluid-container wrapper for those paths while still neutralizing vanilla flat coffee/tea fatigue changes before CMS applies its own model.
 Food consume fatigue reversal now hooks `ISEatFoodAction.perform`, because that is the live seam on MP clients; the older `complete` seam could miss the client consume path entirely.
 `Base.Coffee2` and `Base.Teabag2` are intentionally stronger than one brewed serving when consumed directly, because the vanilla items represent multi-serving ingredient packages and CMS preserves fractional consumption scaling.
 

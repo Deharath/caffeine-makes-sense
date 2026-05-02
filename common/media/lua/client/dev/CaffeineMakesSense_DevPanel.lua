@@ -287,15 +287,15 @@ local function computeSnapshot()
         return appendLocalObservation(buildPendingSnapshot(player, now), player)
     end
 
-    local State = CaffeineMakesSense.State
+    local Runtime = CaffeineMakesSense.Runtime
     local Pharma = CaffeineMakesSense.Pharma
-    if not State or not Pharma then return nil end
+    if not Runtime or not Pharma then return nil end
 
-    local state = State.ensureState(player)
+    local state = Runtime.ensureStateForPlayer(player)
     if not state then return nil end
-    local options = State.getOptions()
+    local options = Runtime.getOptions()
 
-    local rawStimLoad, maskLoad = State.getLoadTotals(state, now, options)
+    local rawStimLoad, maskLoad = Runtime.getLoadTotals(state, now, options)
     local maxCaffeine = tonumber(options.MaxCaffeineLevel) or 4.0
     local peakMask = tonumber(options.PeakMaskStrength) or 0.85
     local maskStr = Pharma.maskStrength(maskLoad, peakMask, maxCaffeine)
@@ -311,8 +311,8 @@ local function computeSnapshot()
         stimFraction = rawStimLoad / peakStim
     end
 
-    local newestDose = State.getNewestDose(state)
-    local newestProfileKey = State.getDoseProfileKey(newestDose)
+    local newestDose = Runtime.getNewestDose(state)
+    local newestProfileKey = Runtime.getDoseProfileKey(newestDose)
     local newestProfile = Pharma.getProfileOptions(options, newestProfileKey)
     local onsetMin = newestProfile.onsetMinutes
     local halfLifeMin = newestProfile.halfLifeMinutes
@@ -609,11 +609,10 @@ function DevPanel.reset()
             return
         end
     end
-    local State = CaffeineMakesSense.State
     local Runtime = CaffeineMakesSense.Runtime
-    if not State or not Runtime then return end
+    if not Runtime then return end
 
-    local state = State.ensureState(player)
+    local state = Runtime.ensureStateForPlayer(player)
     if not state then return end
 
     local fatNow = getFatigue(player)
@@ -661,13 +660,12 @@ function DevPanel.setFatigueTarget(targetFraction)
         end
     end
 
-    local State = CaffeineMakesSense.State
     local Runtime = CaffeineMakesSense.Runtime
-    if not State or not Runtime or type(Runtime.applyCanonicalFatigueTarget) ~= "function" then
+    if not Runtime or type(Runtime.applyCanonicalFatigueTarget) ~= "function" then
         return
     end
 
-    local state = State.ensureState(player)
+    local state = Runtime.ensureStateForPlayer(player)
     if not state then
         return
     end

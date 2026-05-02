@@ -76,6 +76,32 @@ local function ensureCompatMethods(compat)
         return wake
     end
 
+    compat.computeSleepWakeFatigueDelta = function(bedType, sleptHours)
+        local bedKey = tostring(bedType or "")
+        local baseline = 0
+
+        if bedKey == "goodBed" or bedKey == "goodBedPillow" then
+            baseline = -0.085
+        elseif bedKey == "badBed" or bedKey == "badBedPillow" then
+            baseline = 0.15
+        elseif bedKey == "floor" or bedKey == "floorPillow" then
+            baseline = 0.20
+        else
+            baseline = 0
+        end
+
+        if baseline == 0 then
+            return 0
+        end
+
+        local slept = clamp(sleptHours, 0, 16)
+        if slept <= 0 then
+            return 0
+        end
+
+        return baseline * (slept / 8.0)
+    end
+
     return compat
 end
 

@@ -3,10 +3,12 @@ CaffeineMakesSense.SleepHooks = CaffeineMakesSense.SleepHooks or {}
 
 require "CaffeineMakesSense_Runtime"
 require "CaffeineMakesSense_SleepPlanner"
+pcall(require, "CaffeineMakesSense_MPCompat")
 
 local SleepHooks = CaffeineMakesSense.SleepHooks
 local Runtime = CaffeineMakesSense.Runtime or {}
 local Planner = CaffeineMakesSense.SleepPlanner or {}
+local MP = CaffeineMakesSense.MP or {}
 
 local function log(msg)
     print("[CaffeineMakesSense] " .. tostring(msg))
@@ -60,6 +62,35 @@ local function stringContains(value, needle)
         return text:contains(needle)
     end
     return string.find(text, needle, 1, true) ~= nil
+end
+
+local function getWorldAgeMinutes()
+    if type(getGameTime) ~= "function" then
+        return nil
+    end
+    local gameTime = getGameTime()
+    if gameTime and type(gameTime.getWorldAgeHours) == "function" then
+        return (tonumber(gameTime:getWorldAgeHours()) or 0) * 60.0
+    end
+    return nil
+end
+
+local function sendSleepSession(playerObj, bedType, sleepFor, wakeHour)
+    if type(isClient) ~= "function" or isClient() ~= true or type(sendClientCommand) ~= "function" then
+        return
+    end
+
+    local stats = playerObj and type(playerObj.getStats) == "function" and playerObj:getStats() or nil
+    local fatigue = stats and tonumber(stats:get(CharacterStat.FATIGUE)) or nil
+    local payload = {
+        bed_type = tostring(bedType or ""),
+        sleep_for = tonumber(sleepFor) or 0,
+        wake_hour = tonumber(wakeHour),
+        world_minute = getWorldAgeMinutes(),
+        fatigue = fatigue,
+        source = "sleep_hooks",
+    }
+    pcall(sendClientCommand, tostring(MP.NET_MODULE), tostring(MP.SLEEP_SESSION_COMMAND), payload)
 end
 
 local function hasTrait(playerObj, enumKey, legacyKey)
@@ -305,6 +336,7 @@ local function wrapAutoSleep()
         playerObj:setBedType(bedType)
         playerObj:setForceWakeUpTime(tonumber(sleepHours))
         playerObj:setAsleepTime(0.0)
+        sendSleepSession(playerObj, bedType, sleepFor, sleepHours)
         playerObj:setAsleep(true)
 
         if playerObj:getVehicle() then

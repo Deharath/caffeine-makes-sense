@@ -20,6 +20,8 @@ pcall(require, "CaffeineMakesSense_Hooks")
 local MP = (type(mpCompatOrErr) == "table" and mpCompatOrErr) or CaffeineMakesSense.MP
 local Runtime = CaffeineMakesSense.Runtime
 local Pharma = CaffeineMakesSense.Pharma
+local FATIGUE_STAT_MASK = 16
+local SLEEP_FATIGUE_SYNC_INTERVAL_MINUTES = 1.0
 if type(MP) ~= "table" then
     print("[CaffeineMakesSense][MP][SERVER][ERROR] MP compat constants unavailable")
     return
@@ -108,6 +110,7 @@ local function buildSnapshot(playerObj)
         sleepRecoveryFatigue = sleepDebug and sleepDebug.lastRecoveryFatigue
             or tonumber(state.lastSleepRecoveryFatigue)
             or 0,
+        sleepWakeAdjustment = tonumber(state.lastSleepWakeAdjustment) or 0,
         displayedFatigue = displayedFatigue,
         realFatigue = realFatigue,
         sleeping = Runtime.isPlayerAsleep(playerObj),
@@ -138,6 +141,39 @@ local function sendSnapshot(playerObj, reason)
     end
 end
 
+local function syncFatigueToClient(playerObj, phaseTag)
+    if type(syncPlayerStats) ~= "function" then
+        return false
+    end
+    local ok, err = pcall(syncPlayerStats, playerObj, FATIGUE_STAT_MASK)
+    if not ok then
+        log("syncPlayerStats fatigue send failed phase=" .. tostring(phaseTag or "unknown")
+            .. " err=" .. tostring(err))
+        return false
+    end
+    return true
+end
+
+local function syncWakeFatigueToClient(playerObj)
+    return syncFatigueToClient(playerObj, "wake")
+end
+
+local function syncSleepingFatigueToClient(playerObj, state, nowMinute)
+    if type(state) ~= "table" then
+        return false
+    end
+    local now = tonumber(nowMinute) or 0
+    local lastSync = tonumber(state.lastSleepFatigueSyncMinute) or 0
+    if lastSync > 0 and (now - lastSync) < SLEEP_FATIGUE_SYNC_INTERVAL_MINUTES then
+        return false
+    end
+    local sent = syncFatigueToClient(playerObj, "sleep")
+    if sent then
+        state.lastSleepFatigueSyncMinute = now
+    end
+    return sent
+end
+
 local function resetPlayerState(playerObj)
     local nowMinutes = Runtime.getWorldAgeMinutes()
     local state = Runtime.ensureStateForPlayer(playerObj, nowMinutes)
@@ -158,6 +194,41 @@ local function setPlayerFatigueTarget(playerObj, targetFraction)
         return nil
     end
     return Runtime.applyCanonicalFatigueTarget(playerObj, state, targetFraction)
+end
+
+local function recordSleepSession(playerObj, args)
+    local nowMinutes = Runtime.getWorldAgeMinutes()
+    local state = Runtime.ensureStateForPlayer(playerObj, nowMinutes)
+    if not state then
+        return
+    end
+
+    local bedType = tostring(args and args.bed_type or "")
+    if bedType == "" then
+        return
+    end
+
+    state.pendingSleepSession = {
+        bedType = bedType,
+        sleepFor = tonumber(args and args.sleep_for),
+        wakeHour = tonumber(args and args.wake_hour),
+        clientWorldMinute = tonumber(args and args.world_minute),
+        clientFatigue = tonumber(args and args.fatigue),
+        receivedMinute = nowMinutes,
+    }
+
+    if Runtime.isPlayerAsleep(playerObj) and tostring(state.sleepBedType or "") == "" then
+        state.sleepBedType = bedType
+    end
+
+    log(string.format(
+        "sleep session from client: player=%s bed=%s sleepFor=%.2f wake=%.2f clientFat=%s",
+        tostring(Runtime.safeCall(playerObj, "getUsername") or "unknown"),
+        bedType,
+        tonumber(args and args.sleep_for) or 0,
+        tonumber(args and args.wake_hour) or -1,
+        args and args.fatigue ~= nil and string.format("%.3f", tonumber(args.fatigue) or -1) or "nil"
+    ))
 end
 
 local function registerOnEatCallbacks()
@@ -195,6 +266,10 @@ local function onClientCommand(module, command, playerObj, args)
     local ok, err = pcall(function()
         if tostring(command) == tostring(MP.REQUEST_SNAPSHOT_COMMAND) then
             sendSnapshot(playerObj, args and args.reason or "request")
+            return
+        end
+        if tostring(command) == tostring(MP.SLEEP_SESSION_COMMAND) then
+            recordSleepSession(playerObj, args)
             return
         end
         if tostring(command) == tostring(MP.RESET_COMMAND) then
@@ -262,13 +337,51 @@ local function onEveryOneMinute()
     for i = 0, count - 1 do
         local playerObj = Runtime.safeCall(onlinePlayers, "get", i)
         if playerObj then
+            local nowMinutes = Runtime.getWorldAgeMinutes()
+            local state = Runtime.ensureStateForPlayer(playerObj, nowMinutes)
             local ok, err = pcall(Runtime.tickPlayer, playerObj)
             if not ok then
                 log("[ERROR] tickPlayer: " .. tostring(err))
             else
+                if state then
+                    state.lastWakeSyncAsleepFlag = Runtime.isPlayerAsleep(playerObj)
+                    if state.lastWakeSyncAsleepFlag == true then
+                        syncSleepingFatigueToClient(playerObj, state, nowMinutes)
+                    else
+                        state.lastSleepFatigueSyncMinute = 0
+                    end
+                end
                 sendSnapshot(playerObj, "minute")
             end
         end
+    end
+end
+
+local function onPlayerUpdate(playerObj)
+    if not playerObj then
+        return
+    end
+    local nowMinutes = Runtime.getWorldAgeMinutes()
+    local state = Runtime.ensureStateForPlayer(playerObj, nowMinutes)
+    if not state then
+        return
+    end
+
+    local sleepingNow = Runtime.isPlayerAsleep(playerObj)
+    local wasSleeping = state.lastWakeSyncAsleepFlag
+    if type(wasSleeping) ~= "boolean" then
+        wasSleeping = state.wasSleeping == true
+    end
+    state.lastWakeSyncAsleepFlag = sleepingNow
+
+    if wasSleeping == true and sleepingNow == false then
+        local ok, err = pcall(Runtime.tickPlayer, playerObj)
+        if not ok then
+            log("[ERROR] wake transition tickPlayer: " .. tostring(err))
+            return
+        end
+        syncWakeFatigueToClient(playerObj)
+        sendSnapshot(playerObj, "wake_transition")
     end
 end
 
@@ -293,6 +406,10 @@ local function registerEvents()
     if Events and Events.EveryOneMinute and type(Events.EveryOneMinute.Add) == "function" then
         Events.EveryOneMinute.Add(onEveryOneMinute)
         log("EveryOneMinute tick registered")
+    end
+    if Events and Events.OnPlayerUpdate and type(Events.OnPlayerUpdate.Add) == "function" then
+        Events.OnPlayerUpdate.Add(onPlayerUpdate)
+        log("OnPlayerUpdate handler registered")
     end
 end
 

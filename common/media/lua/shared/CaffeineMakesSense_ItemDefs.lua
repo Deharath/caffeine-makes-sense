@@ -23,8 +23,8 @@ ItemDefs.CAFFEINE_ITEMS = {
     ["Base.HotDrinkTeaCeramic"] = { dose = "DoseTea", category = "tea", profile = "tea" },
 }
 
--- Fluids remain listed for reference. The brewed drink items above are the
--- active OnEat integration path in B42.
+-- True fluid-container beverages still use vanilla DrinkFluid(...) instead of
+-- the Food OnEat seam, so CMS keeps this map alive for those consume paths.
 ItemDefs.CAFFEINE_FLUIDS = {
     ["Coffee"] = { dose = "DoseCoffee", category = "coffee", profile = "coffee", vanillaFatigueChange = -0.10 },
     ["Tea"] = { dose = "DoseTea", category = "tea", profile = "tea", vanillaFatigueChange = -0.05 },

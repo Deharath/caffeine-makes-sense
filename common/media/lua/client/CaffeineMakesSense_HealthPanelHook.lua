@@ -2,12 +2,12 @@ CaffeineMakesSense = CaffeineMakesSense or {}
 CaffeineMakesSense.HealthPanelHook = CaffeineMakesSense.HealthPanelHook or {}
 
 require "CaffeineMakesSense_Config"
-require "CaffeineMakesSense_State"
+require "CaffeineMakesSense_Runtime"
 require "CaffeineMakesSense_HealthStatus"
 pcall(require, "CaffeineMakesSense_MPClientRuntime")
 
 local HealthPanelHook = CaffeineMakesSense.HealthPanelHook
-local State = CaffeineMakesSense.State or {}
+local Runtime = CaffeineMakesSense.Runtime or {}
 local HealthStatus = CaffeineMakesSense.HealthStatus or {}
 local MPClient = CaffeineMakesSense.MPClient or {}
 local DEFAULTS = CaffeineMakesSense.DEFAULTS or {}
@@ -76,8 +76,8 @@ local function buildOptions(snapshot)
             NegligibleThreshold = HealthStatus.firstNumber(DEFAULTS.NegligibleThreshold or 0.05, DEFAULTS.NegligibleThreshold),
         }
     end
-    if type(State.getOptions) == "function" then
-        return State.getOptions()
+    if type(Runtime.getOptions) == "function" then
+        return Runtime.getOptions()
     end
     return DEFAULTS
 end
@@ -97,10 +97,10 @@ local function getHealthLine(playerObj)
     local options = buildOptions(snapshot)
     local localRawStimLoad = nil
     local localNewestDoseMinute = nil
-    local state = type(State.ensureState) == "function" and State.ensureState(playerObj) or nil
-    if state and type(State.getLoadTotals) == "function" then
-        localRawStimLoad = HealthStatus.firstNumber(nil, State.getLoadTotals(state, nowMinutes, options))
-        local newestDose = type(State.getNewestDose) == "function" and State.getNewestDose(state) or nil
+    local state = type(Runtime.ensureStateForPlayer) == "function" and Runtime.ensureStateForPlayer(playerObj) or nil
+    if state and type(Runtime.getLoadTotals) == "function" then
+        localRawStimLoad = HealthStatus.firstNumber(nil, Runtime.getLoadTotals(state, nowMinutes, options))
+        local newestDose = type(Runtime.getNewestDose) == "function" and Runtime.getNewestDose(state) or nil
         localNewestDoseMinute = HealthStatus.firstNumber(nil, newestDose and newestDose.doseMinute)
     end
 
